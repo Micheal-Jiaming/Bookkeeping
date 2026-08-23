@@ -243,17 +243,20 @@ def _label_for(choices: tuple[tuple[str, str], ...], value: str) -> str:
 
 
 def _cost_text() -> str:
-    lines = [
-        "A receipt is roughly 1.5–2.5k input tokens plus a few hundred output, "
-        "so at list prices:",
-    ]
+    """What a scan costs, from measured token counts rather than a guess.
+
+    Both shapes are shown because they differ by more than 2x: the reply grows
+    with the number of line items, and a full weekly shop is not a coffee.
+    """
+    lines = ["Per receipt, at list prices — a short receipt (a few items) and a "
+             "long one (a 24-line shop, measured):"]
     for model in MODELS:
         rates = PRICING.get(model)
         if not rates:
             continue
-        # 2k in + 500 out, the shape of a typical single-receipt call.
-        estimate = 2000 / 1e6 * rates[0] + 500 / 1e6 * rates[1]
-        lines.append(f"   {model}:  about ${estimate:.4f} per receipt")
+        small = 1600 / 1e6 * rates[0] + 400 / 1e6 * rates[1]
+        large = 2208 / 1e6 * rates[0] + 1487 / 1e6 * rates[1]
+        lines.append(f"   {model}:  ${small:.4f} – ${large:.4f}")
     lines.append("\nEvery scan records what it actually cost; it is shown beside "
                  "the receipt in the review pane.")
     return "\n".join(lines)

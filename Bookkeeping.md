@@ -18,7 +18,7 @@ reasoning behind it, the exact commands, what has been verified and what has
 not, and the history of fixes that must not be regressed.
 
 - **Location:** `D:\claude\Bookkeeping`
-- **Version:** 1.2.0 (see `VERSION`)
+- **Version:** 1.2.1 (see `VERSION`)
 - **Ships as:** `dist\Bookkeeping.exe` — one file, 28.3 MB, Windows x64, no installer
 - **Stack:** Python 3.13 · **Tkinter** · SQLite · PyInstaller
 - **Recognition:** Claude vision (`claude-opus-5`) primary, Tesseract OCR fallback
@@ -388,10 +388,12 @@ The app starts with **no engine available** and says so in the header. To turn o
 recognition, open **Settings**:
 
 - **Claude vision (recommended):** paste an Anthropic API key. Model defaults to
-  `claude-opus-5`, effort to `medium`. A receipt is roughly 1.5–2.5 k input
-  tokens plus a few hundred output — **about $0.02 per receipt on Opus 5**, and
-  the Settings page shows the estimate for each model. Every scan records what it
-  actually cost, shown in the review pane. The key is stored in
+  `claude-opus-5`, effort to `medium`. Cost depends on how many lines the receipt
+  has, because the reply grows with them: measured on a real 24-line Walmart
+  receipt, 2 208 input + 1 487 output tokens = **$0.048 on Opus 5**; a short
+  receipt is nearer $0.012. Sonnet is about 60 % of that, Haiku about a fifth.
+  The Settings page shows both ends of the range per model, and every scan
+  records what it actually cost, shown in the review pane. The key is stored in
   `data\bookkeeping.db` on that machine only, and is never displayed back in
   full.
 - **Offline OCR:** install the Tesseract binary
@@ -418,7 +420,7 @@ py -m venv .venv
 .venv\Scripts\python.exe bookkeeping.py
 ```
 
-Tests (121, about 40 s — 28 of them drive the real window):
+Tests (134, about 41 s — 28 of them drive the real window):
 
 ```bash
 .venv\Scripts\python.exe -m pytest tests/ -q
@@ -463,7 +465,7 @@ Things in the spec that must not be "tidied up":
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.2.0` |
+| `VERSION` | 1 | `1.2.1` |
 | `requirements.txt` | 19 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
@@ -478,11 +480,11 @@ Things in the spec that must not be "tidied up":
 | `app/ui/receipts.py` | 645 | receipt list and the review pane |
 | `app/ui/reports.py` | 355 | tiles, hand-drawn canvas charts, merchant table |
 | `app/ui/theme.py` | 292 | palette, display scaling, ttk styling, shared widgets |
-| `app/ui/settings_page.py` | 259 | recognition settings |
+| `app/ui/settings_page.py` | 262 | recognition settings |
 | `app/ui/rules.py` | 240 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
 | `app/pipeline.py` | 301 | scan orchestration, thread pool, engine fallback |
-| `app/db.py` | 312 | schema, seed categories and rules, connection handling |
+| `app/db.py` | 348 | schema, seed categories and rules, connection handling |
 | `app/launcher.py` | 157 | data folder, logging, single-instance lock, error reporting |
 | `app/categorize.py` | 131 | the precedence chain and rule matching |
 | `app/validate.py` | 126 | arithmetic and sanity checks → review flags |
@@ -495,14 +497,15 @@ Things in the spec that must not be "tidied up":
 | `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
 | `app/extract/__init__.py` | 80 | engine registry and fallback order |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
-| `tests/test_store.py` | 575 | the service layer, end to end with a stub engine |
+| `tests/test_store.py` | 607 | the service layer, end to end with a stub engine |
 | `tests/test_ui.py` | 462 | builds the real window and drives it |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
 | `tests/test_units.py` | 271 | money, validation, precedence, OCR-text parsing |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
+| `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 
-7 265 lines of Python. Not in version control: `data/` (the user's books),
+7 592 lines of Python. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -512,7 +515,7 @@ Things in the spec that must not be "tidied up":
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23:
 
-**Automated — 121 tests pass** (`pytest tests/ -q`, ~40 s):
+**Automated — 134 tests pass** (`pytest tests/ -q`, ~41 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -550,12 +553,54 @@ Python, no venv, no source):
   with correct proportions and value labels, 15 categories and 59 rules, and the
   settings controls.
 
+**One real receipt, read and measured** (2026-08-23). The user photographed a
+Walmart receipt — 24 printed lines, real abbreviations (`GV TWIST MOP`,
+`HS SH CLS8.5`, `EQJELLUBE8OZ`), three 5-cent bottle deposits, two identical
+`FRENCH BREAD` lines, and the top of the receipt out of frame so the store name
+and date are genuinely missing. It is now a permanent fixture,
+`tests/test_real_receipt.py`, and it is trustworthy because the receipt checks
+itself four ways and all four hold:
+
+    items sum                  == printed subtotal 141.94
+    subtotal + tax             == printed total    149.44
+    cash - total + rounding    == printed change     50.60
+    printed lines - 3 deposits == "# ITEMS SOLD 21"
+
+What that run established, pushing the real reading through the real pipeline:
+
+- **Reading accuracy on this receipt: all 24 lines, every amount, and all four
+  totals correct.** A single misread digit would have broken one of the checks.
+- **Categorisation: 24 of 24 lines land where a person would put them** — after
+  the fix below. 17 decided by keyword rule, 7 by the model.
+- **The plain-English expansion earns its keep.** Five lines whose printed names
+  are unreadable (`HS SH CLS8.5`, `AIM TP 5.5OZ`, `DWN EZS 22Z`, `GAIN`,
+  `ME DEPOSIT`) are categorised by keyword rules that only match because the
+  model expanded the abbreviation into `…shampoo`, `…toothpaste`, `…dish soap`,
+  `…detergent`, `bottle deposit`.
+- **It found a real bug** (§11.18): the seeded `GREAT VALUE` rule filed a mop, a
+  bottle of ammonia and a pack of sponges as Groceries — $16.00 of a $141.94
+  basket in the wrong category.
+- **Validation behaved exactly as designed**: one flag, "No purchase date was
+  found", and *no* arithmetic complaint, because the reading really did add up.
+  The receipt could not be confirmed until a date was supplied.
+- **The reports attributed every cent**: Household $76.06, Health & Pharmacy
+  $28.12, Groceries $27.19, Personal Care $10.42, Tax & unitemised $7.50, Fees &
+  Taxes $0.15 — summing exactly to the $149.44 spent.
+
 **Not verified, and honestly so:**
 
-- **A real Claude vision call has never been made** — no API key was available in
-  this environment. The request shape is verified against a mock; the *accuracy*
-  of a reading on a real crumpled Walmart receipt is unmeasured. This is the
-  first thing to check once a key is configured.
+- **That reading was made by Claude, but not by the app.** No API key exists in
+  this environment, so the transcription above is this assistant reading the
+  photograph directly, encoded into the schema and replayed through the real
+  engine against a local stand-in endpoint. Every part is real except the network
+  call. What remains untested is the join: a live key, a real HTTP round trip,
+  and what the model makes of *its own* view of the pixels rather than a reading
+  handed to it.
+- **The photograph's pixels have never gone through the app.** The uploaded image
+  was not saved anywhere on disk that could be reached, so normalisation ran on a
+  stand-in file. The open question that matters: the long edge is capped at
+  1568 px, and on a receipt photographed at full phone resolution that is a real
+  reduction — whether the item names survive it is unmeasured.
 - **Tesseract has never run here** — the binary is not installed. Its
   text-parsing half (`parse_receipt_text`) is unit-tested against realistic OCR
   text, but the OCR half and the confidence calculation are untested in practice.
@@ -682,7 +727,17 @@ Python, no venv, no source):
     whole session and give each test a `Toplevel`; they also make it transparent
     rather than withdrawn, because an unmapped window never gets real geometry
     and the charts would never draw (`tests/test_ui.py`).
-17. **A one-file PyInstaller build runs the app in a child process.** Verifying
+18. **A store brand is not a category.** The seeded `GREAT VALUE → Groceries`
+    rule was wrong in kind, and the first real receipt exposed it: Walmart sells
+    Great Value mops, ammonia and sponges alongside Great Value milk, and all
+    three were filed as Groceries. It fired more often than it would have on
+    printed names alone, because rule matching also searches the model's
+    plain-English expansion — `GV TWIST MOP` does not contain "GREAT VALUE" but
+    `Great Value twist mop` does. The rule is gone, and a schema migration
+    (`user_version` 2) removes it from databases that already have it, leaving an
+    identical rule the *user* wrote in place. `MARKETSIDE` stays: that one really
+    is Walmart's fresh-food line (`app/db.py`, `tests/test_real_receipt.py`).
+19. **A one-file PyInstaller build runs the app in a child process.** Verifying
     "did a window appear" by filtering on the pid returned by `Popen` finds
     nothing but the bootloader's hidden window — which looks exactly like a crash
     on startup and is not. Any future verification script must walk the process
@@ -720,9 +775,12 @@ and needs the user's say-so. When they want it: `gh repo create Bookkeeping
 
 Ranked by how much they would improve the daily experience:
 
-1. **Accuracy measurement.** A fixture set of real receipt photos with
-   hand-checked expected values, and a script reporting per-field accuracy.
-   Without it, "the recognition is good" is an opinion.
+1. **More real receipts.** There is now exactly one
+   (`tests/test_real_receipt.py`) and it immediately found a mis-categorisation
+   bug, so the next few are likely to be just as productive. Worth collecting a
+   handful — a restaurant bill, a fuel receipt, something faded or folded, a
+   non-USD one — with hand-checked expected values, and reporting per-field
+   accuracy across them. One receipt is an anecdote.
 2. **Learning from corrections.** When a reviewer re-categorises the same item
    name twice, offer to create the keyword rule. The rules table already supports
    it; only the suggestion is missing.
@@ -747,4 +805,5 @@ Ranked by how much they would improve the daily experience:
 | 1.0.0 | 2026-08-23 | First version. Research of Receipt Wrangler / Budget Lens / Firefly III; Claude-vision + Tesseract engines behind one interface; rules-then-model categorisation; arithmetic validation and review workflow; FastAPI + SQLite backend; browser interface with reports and CSV export; 69 tests. |
 | 1.0.1 | 2026-08-23 | Inline data-URI favicon, so a browser's automatic `/favicon.ico` request stopped logging a 404 that looked like a fault. |
 | 1.1.0 | 2026-08-23 | **Portable Windows executable.** One-file PyInstaller build (`Bookkeeping.spec`, `build.bat`, generated icon); launcher with a writable-data-folder search, port selection and single-instance hand-off; Quit button and browser heartbeat so the process could not linger invisibly. Also fixed merchant rules outranking the model's per-item category (§11.8). 97 tests. |
+| 1.2.1 | 2026-08-23 | First real receipt read end to end (§9). Removed the seeded `GREAT VALUE` rule — a brand, not a category — with a migration for books that already exist, and kept the receipt as a permanent 12-test fixture. Settings now shows measured costs instead of estimates. 134 tests. |
 | 1.2.0 | 2026-08-23 | **A real desktop interface.** The browser UI (FastAPI, uvicorn, HTML/CSS/JS) was removed and replaced with a Tkinter window: menu bar, four pages, review pane with the receipt image beside the extracted fields, hand-drawn canvas charts, dark/light themes, remembered window geometry, clipboard paste, keyboard shortcuts. The HTTP layer's logic was extracted intact into `app/store.py`, so the same behaviour is now reachable as function calls; the API tests became store tests and 28 new tests drive the real window. Single-instance handling changed from "hand off to the running copy" to a lock on the data folder. Fixes §11.11–§11.17. 121 tests. |

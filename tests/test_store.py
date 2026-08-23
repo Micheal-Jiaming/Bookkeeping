@@ -104,6 +104,38 @@ def test_a_fresh_database_has_categories_and_rules(books):
     assert "Uncategorized" not in store.model_category_names()
 
 
+def test_an_existing_database_loses_the_bad_store_brand_rule(books):
+    """The migration must reach books that were created before the fix.
+
+    Rules are seeded only on a fresh database, so a user who already had the
+    "GREAT VALUE" rule would otherwise keep mis-filing every Great Value
+    product for ever.
+    """
+    db, store = books["db"], books["store"]
+    groceries = categories(store)["Groceries"]
+    with db.connect() as connection:
+        connection.execute(
+            "INSERT INTO category_rule (field, match_type, pattern, category_id, "
+            "priority, enabled, is_builtin) "
+            "VALUES ('description', 'contains', 'GREAT VALUE', ?, 50, 1, 1)",
+            (groceries,),
+        )
+        # A rule the user wrote themselves, which must survive.
+        connection.execute(
+            "INSERT INTO category_rule (field, match_type, pattern, category_id, "
+            "priority, enabled, is_builtin) "
+            "VALUES ('description', 'contains', 'GREAT VALUE', ?, 40, 1, 0)",
+            (groceries,),
+        )
+        connection.execute("PRAGMA user_version = 1")
+
+    db.init_db()
+
+    remaining = [r for r in store.list_rules() if r["pattern"] == "GREAT VALUE"]
+    assert len(remaining) == 1
+    assert remaining[0]["is_builtin"] == 0, "only the built-in copy is removed"
+
+
 def test_an_empty_set_of_books_reports_nothing(books):
     store = books["store"]
     assert store.status_counts() == {}

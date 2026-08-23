@@ -13,6 +13,7 @@ Design notes
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,7 +21,9 @@ from typing import Iterator
 
 from .paths import default_data_dir
 
-SCHEMA_VERSION = 1
+log = logging.getLogger("bookkeeping.db")
+
+SCHEMA_VERSION = 2
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -138,7 +141,12 @@ BUILTIN_CATEGORIES: list[tuple[str, str, int]] = [
 # are matched case-insensitively as substrings.
 BUILTIN_RULES: list[tuple[str, str, str, int]] = [
     # (pattern, category, field, priority)
-    ("GREAT VALUE", "Groceries", "description", 50),
+    #
+    # No store-brand patterns here. "GREAT VALUE" was seeded originally and had
+    # to be removed (see the migration below): it is a *brand*, not a category --
+    # Walmart sells Great Value mops, ammonia and sponges next to Great Value
+    # milk, and on a real receipt it filed all three of those as Groceries.
+    # "MARKETSIDE" stays because it is specifically Walmart's fresh-food line.
     ("MARKETSIDE", "Groceries", "description", 50),
     ("BANANA", "Groceries", "description", 60),
     ("MILK", "Groceries", "description", 60),
@@ -250,15 +258,43 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 
 def init_db() -> None:
-    """Create the schema and seed built-in data. Safe to call on every start."""
+    """Create the schema, seed built-in data, migrate. Safe to call every start."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     with connect() as db:
+        # Read the version *before* the schema script, which is what tells a
+        # migration whether it has already run.
+        previous = db.execute("PRAGMA user_version").fetchone()["user_version"]
         db.executescript(SCHEMA)
-        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         _seed_categories(db)
         _seed_rules(db)
         _seed_settings(db)
+        _migrate(db, previous)
+        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _migrate(db: sqlite3.Connection, previous: int) -> None:
+    """Bring an existing database up to ``SCHEMA_VERSION``.
+
+    Migrations must be safe to run on a brand-new database too (a fresh file
+    reports version 0), so each one is written to be a no-op when there is
+    nothing to change.
+    """
+    if previous < 2:
+        # Version 2 drops the seeded "GREAT VALUE" rule. It encoded a store
+        # brand rather than a category, and because rule matching also searches
+        # the model's plain-English expansion of an item name, it captured
+        # every Great Value product -- filing a mop, ammonia and sponges as
+        # Groceries on the first real receipt this app ever read. Only the
+        # built-in copy is removed: a rule the user created themselves, even
+        # with the same pattern, is theirs to keep.
+        removed = db.execute(
+            "DELETE FROM category_rule WHERE is_builtin = 1 AND field = 'description' "
+            "AND pattern = 'GREAT VALUE'"
+        ).rowcount
+        if removed:
+            log.info("Removed %d built-in 'GREAT VALUE' rule(s): a brand, not a "
+                     "category", removed)
 
 
 def _seed_categories(db: sqlite3.Connection) -> None:
