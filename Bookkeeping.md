@@ -18,7 +18,7 @@ reasoning behind it, the exact commands, what has been verified and what has
 not, and the history of fixes that must not be regressed.
 
 - **Location:** `D:\claude\Bookkeeping`
-- **Version:** 1.2.1 (see `VERSION`)
+- **Version:** 1.2.2 (see `VERSION`)
 - **Ships as:** `dist\Bookkeeping.exe` — one file, 28.3 MB, Windows x64, no installer
 - **Stack:** Python 3.13 · **Tkinter** · SQLite · PyInstaller
 - **Recognition:** Claude vision (`claude-opus-5`) primary, Tesseract OCR fallback
@@ -458,6 +458,53 @@ Things in the spec that must not be "tidied up":
 - `console=False`, which is why `app/launcher.py` never assumes `sys.stdout`
   exists and reports fatal errors with a message box.
 
+### The development tools
+
+Four scripts in `tools\` exist because of specific things that went wrong. They
+are part of the project, not scratch work: a future session that needs to check
+the build, look at the interface, or exercise the vision path should reach for
+these rather than write them again.
+
+```bash
+py tools\verify_exe.py                      # does the BUILD work?
+py tools\screenshot_pages.py --out shots    # what does it LOOK like?
+py tools\seed_demo.py --data-dir C:\temp\demo --with-image
+py tools\mock_anthropic.py --port 8899      # a fake API, for testing without a key
+py tools\make_sample_receipt.py out.png     # a synthetic receipt image
+```
+
+- **`verify_exe.py`** — the test suite proves the *code* is right; only this
+  proves the *build* is. It copies the .exe to an empty folder, waits for the
+  window, checks the data folder is created, screenshots it, confirms a second
+  launch is refused and exits, closes the window and confirms the process ends,
+  then runs `--version` to prove the lock was released. Everything it checks has
+  been broken at least once. It also carries the hard-won detail that a one-file
+  PyInstaller build runs the app in a **child** process, so looking for the
+  window by the launched pid finds nothing (§11.19).
+- **`screenshot_pages.py`** — a native window cannot be inspected the way a web
+  page can. `tests/test_ui.py` proves the interface *holds together*; only a
+  picture shows that it *looks* right, and three real faults were visible in no
+  other way (§11.12–§11.14). Note the two traps it encodes: `time.sleep` does not
+  run Tk's event loop, so `after()` work (the debounced chart redraw) never
+  happens unless you pump it; and `ImageGrab` captures the screen, not the
+  window, so the window has to be raised first.
+- **`seed_demo.py`** — demo books for screenshots and for trying the reports on
+  something other than an empty database. `--data-dir` is required rather than
+  defaulted, and it refuses books that already hold receipts, precisely so it can
+  never be pointed at somebody's real ones by accident.
+- **`mock_anthropic.py`** — serves the real 24-line Walmart reading from
+  `tests/test_real_receipt.py` as a proper Messages API envelope, so
+  `messages.parse` validates it against the generated schema exactly as in
+  production. Point the app's Settings at `http://127.0.0.1:8899` with any
+  non-empty key. This is how the vision path was exercised *inside the frozen
+  .exe* without a key.
+
+**Housekeeping that bit once:** these are all servers or long-lived processes.
+A `mock_anthropic.py` instance was once left listening on port 8899 for two and
+a half hours after the test that needed it had finished. Stop background helpers
+when done, and check with
+`Get-NetTCPConnection -State Listen | Where-Object LocalPort -ge 8760`.
+
 ---
 
 ## 8. Files
@@ -465,7 +512,7 @@ Things in the spec that must not be "tidied up":
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.2.1` |
+| `VERSION` | 1 | `1.2.2` |
 | `requirements.txt` | 19 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
@@ -497,6 +544,10 @@ Things in the spec that must not be "tidied up":
 | `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
 | `app/extract/__init__.py` | 80 | engine registry and fallback order |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
+| `tools/verify_exe.py` | 199 | drives the built .exe and checks it behaves (§7) |
+| `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
+| `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
+| `tools/screenshot_pages.py` | 114 | opens the window and screenshots every page |
 | `tests/test_store.py` | 607 | the service layer, end to end with a stub engine |
 | `tests/test_ui.py` | 462 | builds the real window and drives it |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
@@ -505,7 +556,7 @@ Things in the spec that must not be "tidied up":
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 
-7 592 lines of Python. Not in version control: `data/` (the user's books),
+8 179 lines of Python. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -616,6 +667,29 @@ What that run established, pushing the real reading through the real pipeline:
 - No load or long-horizon testing; no non-USD receipt; no non-Latin-script
   receipt. The .exe is unsigned, so SmartScreen behaviour on a fresh machine is
   expected but unobserved.
+
+### Where to pick up
+
+The state as of 1.2.2, for whoever reads this next:
+
+- **Everything is committed and tagged** (`v1.2.2`), pushed to the `mirror`
+  remote, working tree clean. `dist\Bookkeeping.exe` is built from this commit
+  and has passed `tools\verify_exe.py`.
+- **The two open verifications**, in order of value:
+  1. **A live API call.** Put a real key in Settings, add the receipt photo, and
+     compare against the fixture in `tests/test_real_receipt.py` (merchant
+     `null`, date `null`, subtotal 141.94, tax 7.50, total 149.44, 24 lines). If
+     it matches, the last real gap closes. If it does not, the difference is the
+     most interesting data this project can produce.
+  2. **A real photograph through `app/images.py`.** No phone photo has ever been
+     normalised by the app. The long edge is capped at 1568 px, which on a
+     full-resolution photo is a large reduction; whether the item names survive
+     it is unknown. Measure before changing the cap.
+- **The next feature worth building** is in §13: more real receipts. One found a
+  mis-categorisation bug within minutes; a restaurant bill, a fuel receipt and
+  something faded would likely each find their own.
+- **Do not** re-add a store-brand keyword rule (§11.18), reintroduce a web
+  interface (§10), or "simplify" the spec's excludes (§11.11).
 
 ---
 
@@ -805,5 +879,6 @@ Ranked by how much they would improve the daily experience:
 | 1.0.0 | 2026-08-23 | First version. Research of Receipt Wrangler / Budget Lens / Firefly III; Claude-vision + Tesseract engines behind one interface; rules-then-model categorisation; arithmetic validation and review workflow; FastAPI + SQLite backend; browser interface with reports and CSV export; 69 tests. |
 | 1.0.1 | 2026-08-23 | Inline data-URI favicon, so a browser's automatic `/favicon.ico` request stopped logging a 404 that looked like a fault. |
 | 1.1.0 | 2026-08-23 | **Portable Windows executable.** One-file PyInstaller build (`Bookkeeping.spec`, `build.bat`, generated icon); launcher with a writable-data-folder search, port selection and single-instance hand-off; Quit button and browser heartbeat so the process could not linger invisibly. Also fixed merchant rules outranking the model's per-item category (§11.8). 97 tests. |
+| 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.2.1 | 2026-08-23 | First real receipt read end to end (§9). Removed the seeded `GREAT VALUE` rule — a brand, not a category — with a migration for books that already exist, and kept the receipt as a permanent 12-test fixture. Settings now shows measured costs instead of estimates. 134 tests. |
 | 1.2.0 | 2026-08-23 | **A real desktop interface.** The browser UI (FastAPI, uvicorn, HTML/CSS/JS) was removed and replaced with a Tkinter window: menu bar, four pages, review pane with the receipt image beside the extracted fields, hand-drawn canvas charts, dark/light themes, remembered window geometry, clipboard paste, keyboard shortcuts. The HTTP layer's logic was extracted intact into `app/store.py`, so the same behaviour is now reachable as function calls; the API tests became store tests and 28 new tests drive the real window. Single-instance handling changed from "hand off to the running copy" to a lock on the data folder. Fixes §11.11–§11.17. 121 tests. |
