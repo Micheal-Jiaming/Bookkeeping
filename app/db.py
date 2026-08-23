@@ -18,11 +18,15 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from .paths import default_data_dir
+
 SCHEMA_VERSION = 1
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
-DATA_DIR = PROJECT_DIR / "data"
+# Resolved at import from BOOKKEEPING_DATA if the desktop launcher set it,
+# otherwise "data" beside the program. See app/paths.py for the reasoning.
+DATA_DIR = default_data_dir()
 IMAGE_DIR = DATA_DIR / "images"
 DB_PATH = DATA_DIR / "bookkeeping.db"
 

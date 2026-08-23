@@ -179,7 +179,25 @@ def test_merchant_rules_catch_what_item_rules_miss():
         RULES, INDEX, description="UNKNOWN THING", merchant="WALMART #1234",
         model_suggestion=None,
     )
-    assert (category_id, source) == (12, "rule")
+    assert (category_id, source) == (12, "merchant")
+
+
+def test_the_model_beats_a_blanket_merchant_rule():
+    """A specific per-item judgement must not be overwritten by "everything at
+    this shop is Groceries" -- the bug found while testing the frozen build."""
+    category_id, source = resolve_category(
+        RULES, INDEX, description="SOURDOUGH BOULE", merchant="WALMART #1234",
+        model_suggestion="Produce",
+    )
+    assert (category_id, source) == (11, "model")
+
+
+def test_a_merchant_rule_still_wins_over_nothing_at_all():
+    category_id, source = resolve_category(
+        RULES, INDEX, description="SOURDOUGH BOULE", merchant="WALMART #1234",
+        model_suggestion="Not A Real Category",
+    )
+    assert (category_id, source) == (12, "merchant")
 
 
 # ------------------------------------------------------- OCR text parsing

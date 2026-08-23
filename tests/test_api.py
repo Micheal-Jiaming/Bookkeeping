@@ -369,6 +369,28 @@ def test_a_new_rule_can_be_backfilled_over_existing_receipts(
     assert cable["category_name"] == "Office & Supplies"
 
 
+def test_backfill_does_not_let_a_merchant_rule_overwrite_the_models_choice(
+    client, sync_scan, app_modules, monkeypatch, sample_receipt_png
+):
+    """The seeded WALMART rule says Groceries; the model said Dining for this
+    line. Re-applying rules must leave the model's specific answer alone."""
+    reading = ExtractedReceipt(
+        merchant="Walmart", purchased_at="2026-07-14", subtotal="6.00", tax="0.00",
+        total="6.00", confidence=0.9,
+        items=[ExtractedItem(description="SOURDOUGH BOULE", amount="6.00",
+                             category="Dining")],
+    )
+    monkeypatch.setattr(app_modules["pipeline"], "build_engines",
+                        lambda s: [StubEngine(reading)])
+    path, _ = sample_receipt_png
+    receipt_id = upload(client, path).json()["created"][0]["id"]
+    assert client.get(f"/api/receipts/{receipt_id}").json()["items"][0]["category_source"] == "model"
+
+    client.post("/api/rules/apply")
+    item = client.get(f"/api/receipts/{receipt_id}").json()["items"][0]
+    assert (item["category_name"], item["category_source"]) == ("Dining", "model")
+
+
 def test_backfill_leaves_manual_choices_and_confirmed_books_alone(
     client, sync_scan, stub_engine, sample_receipt_png
 ):

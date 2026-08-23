@@ -15,3 +15,7 @@ pytesseract==0.3.13
 # Test-only
 pytest==9.1.1
 httpx==0.28.1
+
+# Build-only: produces dist\Bookkeeping.exe from Bookkeeping.spec (build.bat
+# installs this on demand, so a machine that only runs the app does not need it).
+pyinstaller==6.22.2

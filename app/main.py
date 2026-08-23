@@ -26,17 +26,20 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import pipeline, settings_store
+from . import paths, pipeline, settings_store
 from .categorize import category_index, category_names, load_rules, resolve_category
 from .db import IMAGE_DIR, connect, init_db
 from .extract import engine_status, sha256_file
 from .images import ImageError, normalise
 from .money import from_cents, to_cents
+from .runtime import PING_INTERVAL_SECONDS, runtime
 from .validate import check
 
 log = logging.getLogger("bookkeeping")
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+# Resolved through app/paths.py so the frozen build finds the bundled copy under
+# sys._MEIPASS rather than next to a source file that no longer exists.
+STATIC_DIR = paths.static_dir()
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 VALID_STATUSES = {"uploaded", "scanning", "needs_review", "confirmed", "failed"}
 
@@ -50,12 +53,22 @@ async def lifespan(app: FastAPI):
 
 
 def _version() -> str:
-    """The single source of truth for the version is the VERSION file."""
-    version_file = Path(__file__).resolve().parent.parent / "VERSION"
-    try:
-        return version_file.read_text(encoding="utf-8").strip() or "0.0.0"
-    except OSError:
-        return "0.0.0"
+    """The single source of truth for the version is the VERSION file.
+
+    In the frozen build the file is bundled beside the package, so both
+    locations are tried.
+    """
+    for version_file in (
+        paths.resource_dir() / "VERSION",
+        Path(__file__).resolve().parent.parent / "VERSION",
+    ):
+        try:
+            text = version_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if text:
+            return text
+    return "0.0.0"
 
 
 app = FastAPI(title="Bookkeeping", version=_version(), lifespan=lifespan)
@@ -181,7 +194,41 @@ def health() -> dict:
                 "SELECT status, COUNT(*) AS n FROM receipt GROUP BY status"
             ).fetchall()
         }
-    return {"ok": True, "version": app.version, "receipts": counts}
+    return {
+        # "bookkeeping" identifies this server to a second copy of the .exe,
+        # which uses it to tell "my app is already running on this port" from
+        # "something else has the port".
+        "app": "bookkeeping",
+        "ok": True,
+        "version": app.version,
+        "receipts": counts,
+        "data_dir": str(IMAGE_DIR.parent),
+        "frozen": paths.is_frozen(),
+        "desktop": runtime.desktop,
+        "ping_interval": PING_INTERVAL_SECONDS,
+        # Null means "the idle watchdog is off", which is the front end's signal
+        # that it need not send heartbeats at all.
+        "idle_timeout": runtime.idle_timeout if runtime.armed else None,
+    }
+
+
+@app.post("/api/ping")
+def ping() -> dict:
+    """Heartbeat from the open page; see app/runtime.py."""
+    runtime.ping()
+    return {"ok": True, "ping_interval": PING_INTERVAL_SECONDS}
+
+
+@app.post("/api/quit")
+def quit_app() -> dict:
+    """Ask the desktop build to stop. A no-op worth reporting when not frozen."""
+    if not runtime.desktop:
+        return {
+            "stopping": False,
+            "detail": "Not running as the desktop app; stop the server in its own window.",
+        }
+    runtime.request_shutdown()
+    return {"stopping": True, "detail": "Bookkeeping is closing. You can close this tab."}
 
 
 @app.get("/api/engines")
@@ -648,6 +695,11 @@ def apply_rules(include_confirmed: bool = False) -> dict:
     any rule. By default confirmed receipts are left alone too, so re-running
     rules cannot silently rewrite books that were already signed off; pass
     ``include_confirmed=true`` to reclassify everything.
+
+    A line already categorised by the model is only overwritten by a
+    *description* rule, never by a broad merchant rule -- the same precedence
+    ``resolve_category`` applies during a scan. A merchant rule can still fill in
+    a line that nothing had categorised at all.
     """
     changed = 0
     with connect() as db:
@@ -668,10 +720,15 @@ def apply_rules(include_confirmed: bool = False) -> dict:
                 merchant=row["merchant"] or row["merchant_raw"] or "",
                 model_suggestion=None,
             )
-            if source == "rule" and category_id != row["category_id"]:
+            if category_id == row["category_id"]:
+                continue
+            fills_a_gap = source == "merchant" and (row["category_source"] or "") in (
+                "", "default",
+            )
+            if source == "rule" or fills_a_gap:
                 db.execute(
-                    "UPDATE line_item SET category_id = ?, category_source = 'rule' WHERE id = ?",
-                    (category_id, row["id"]),
+                    "UPDATE line_item SET category_id = ?, category_source = ? WHERE id = ?",
+                    (category_id, source, row["id"]),
                 )
                 changed += 1
     return {"examined": len(rows), "changed": changed}

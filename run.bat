@@ -1,8 +1,11 @@
 @echo off
-rem Start the Bookkeeping app and open it in the default browser.
+rem Run Bookkeeping from source (development). For the portable program, build
+rem dist\Bookkeeping.exe with build.bat and run that instead.
 rem
-rem First run creates .venv and installs the dependencies; later runs just start
-rem the server, so this is the only command needed day to day.
+rem This uses the same entry point as the .exe, so behaviour matches what users
+rem get -- except for --keep-alive, which stops the app from closing itself when
+rem no browser tab is open. That auto-close is right for a desktop program and
+rem wrong for a development server you keep restarting.
 
 setlocal
 cd /d "%~dp0"
@@ -15,12 +18,7 @@ if not exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :failed
 )
 
-set HOST=127.0.0.1
-set PORT=8765
-
-echo Bookkeeping is starting on http://%HOST%:%PORT%
-start "" "http://%HOST%:%PORT%"
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host %HOST% --port %PORT%
+".venv\Scripts\python.exe" bookkeeping.py --keep-alive %*
 goto :eof
 
 :failed

@@ -4,6 +4,13 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# The user's own books, receipt images and API key. Personal data, not source.
+# PyInstaller output. dist\Bookkeeping.exe is fully regenerable from the tracked
+# sources with build.bat, so it is not versioned -- but note that means Git
+# cannot restore a working binary either. build.bat keeps the previous .exe as
+# dist\Bookkeeping.previous.exe for exactly that reason.
+build/
+dist/
+
+# The user's own books, receipt images, log and API key. Personal data, not source.
 data/
 sample-receipt.png

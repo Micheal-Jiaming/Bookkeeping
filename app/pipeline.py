@@ -27,6 +27,7 @@ from .categorize import category_index, category_names, load_rules, resolve_cate
 from .db import IMAGE_DIR, connect
 from .extract import ExtractionError, ExtractionResult, build_engines
 from .money import to_cents
+from .runtime import runtime
 from .validate import check
 
 log = logging.getLogger("bookkeeping.pipeline")
@@ -59,12 +60,16 @@ def shutdown() -> None:
 
 
 def _run_scan(receipt_id: int) -> None:
+    # Marked as work in progress so the desktop build's idle watchdog cannot
+    # exit mid-scan and throw the reading away.
+    runtime.begin_work()
     try:
         scan_now(receipt_id)
     except Exception:  # a worker thread that dies silently is a debugging hole
         log.exception("Scan of receipt %s crashed", receipt_id)
-        _set_status(receipt_id, "failed", error="Internal error during scan; see the console log.")
+        _set_status(receipt_id, "failed", error="Internal error during scan; see the log.")
     finally:
+        runtime.end_work()
         with _in_flight_lock:
             _in_flight.discard(receipt_id)
 

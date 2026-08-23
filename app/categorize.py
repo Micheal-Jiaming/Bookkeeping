@@ -3,16 +3,22 @@
 Precedence, strongest first:
 
 1. **Manual** -- whatever the user set by hand is never overwritten.
-2. **Rules** -- deterministic keyword/regex rules on the item description, then
-   on the merchant. Rules win over the model because they are auditable and
-   repeatable: if "GREAT VALUE" means Groceries today it means Groceries next
-   month, whereas a model may drift between runs.
+2. **Description rules** -- deterministic keyword/regex rules on the item name.
+   These beat the model because they are auditable and repeatable: if
+   "GREAT VALUE" means Groceries today it means Groceries next month, whereas a
+   model may drift between runs.
 3. **Model** -- the category the vision model suggested for that line, accepted
    only if it names a category that actually exists.
-4. **Default** -- "Uncategorized", so nothing silently vanishes from reports.
+4. **Merchant rules** -- "everything from this shop is Groceries". Deliberately
+   *below* the model: a merchant rule is a coarse safety net for lines nothing
+   else recognised, and letting it outrank the model would relabel a specific,
+   correct per-item judgement ("SOURDOUGH BOULE" → Dining) with a blanket store
+   default. This ordering is the whole reason merchant rules are seeded with a
+   high priority number.
+5. **Default** -- "Uncategorized", so nothing silently vanishes from reports.
 
-This ordering follows the same rules-then-AI shape Firefly III uses for its
-transaction rules and Receipt Wrangler for its category grants.
+This follows the same rules-then-AI shape Firefly III uses for its transaction
+rules and Receipt Wrangler for its category grants.
 """
 
 from __future__ import annotations
@@ -56,10 +62,17 @@ def _matches(rule: Rule, text: str) -> bool:
 
 
 def match_rules(
-    rules: list[Rule], description: str, merchant: str = ""
+    rules: list[Rule], description: str, merchant: str = "", field: str | None = None
 ) -> tuple[int | None, int | None]:
-    """First matching rule for this line. Returns (category_id, rule_id)."""
+    """First matching rule for this line. Returns (category_id, rule_id).
+
+    ``field`` restricts matching to rules on that field, which is how the
+    precedence chain evaluates description rules before the model and merchant
+    rules after it.
+    """
     for rule in rules:
+        if field is not None and rule.field != field:
+            continue
         haystack = description if rule.field == "description" else merchant
         if _matches(rule, haystack):
             return rule.category_id, rule.id
@@ -74,8 +87,12 @@ def resolve_category(
     merchant: str,
     model_suggestion: str | None,
 ) -> tuple[int | None, str]:
-    """Decide one line's category. Returns (category_id, source)."""
-    category_id, _ = match_rules(rules, description, merchant)
+    """Decide one line's category. Returns (category_id, source).
+
+    Sources, in the order they are tried: ``rule`` (a description rule),
+    ``model``, ``merchant`` (a merchant rule), ``default``.
+    """
+    category_id, _ = match_rules(rules, description, merchant, field="description")
     if category_id is not None:
         return category_id, "rule"
 
@@ -83,6 +100,10 @@ def resolve_category(
         suggested = category_ids_by_name.get(model_suggestion.strip().lower())
         if suggested is not None:
             return suggested, "model"
+
+    category_id, _ = match_rules(rules, description, merchant, field="merchant")
+    if category_id is not None:
+        return category_id, "merchant"
 
     default = category_ids_by_name.get(DEFAULT_CATEGORY.lower())
     return default, "default"

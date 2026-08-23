@@ -24,6 +24,9 @@
   <div class="topbar-right">
     <span id="engine-pill" class="pill" title="Recognition engine">engine…</span>
     <button id="theme-toggle" class="ghost" title="Switch light/dark">Dark</button>
+    <!-- Shown only by the desktop build: a windowed .exe has no console to
+         close, so the UI has to be able to stop it. -->
+    <button id="quit" class="ghost" title="Close Bookkeeping" hidden>Quit</button>
   </div>
 </header>
 
@@ -216,6 +219,13 @@
 </main>
 
 <div id="toast" class="toast" hidden></div>
+<div id="farewell" class="farewell" hidden>
+  <div class="farewell-box">
+    <h2>Bookkeeping is closed</h2>
+    <p class="muted">Your books are saved. You can close this tab.</p>
+    <p class="muted">Start the program again to carry on.</p>
+  </div>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>

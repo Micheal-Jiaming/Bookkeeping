@@ -582,6 +582,43 @@ function renderEnginePill(status) {
   }
 }
 
+/* ------------------------------------------------------- desktop lifetime */
+
+/* The desktop build exits when no tab has pinged it for a while, so an open page
+ * must keep saying "still here". Nothing here runs when the app is started from
+ * source with run.bat -- /api/health reports desktop: false and the interval is
+ * never started. */
+async function initDesktopLifetime() {
+  let health;
+  try {
+    health = await api('/api/health');
+  } catch {
+    return;
+  }
+  if (!health.desktop) return;
+
+  $('#quit').hidden = false;
+  let timer = null;
+  // A null idle_timeout means the server was started with --keep-alive and will
+  // not close itself, so there is nothing to keep alive.
+  if (health.idle_timeout) {
+    const intervalMs = Math.max(2, Number(health.ping_interval) || 10) * 1000;
+    const beat = () => { api('/api/ping', { method: 'POST' }).catch(() => {}); };
+    beat();
+    timer = setInterval(beat, intervalMs);
+    // A tab coming back from a suspended laptop should re-announce itself at
+    // once rather than waiting out the interval.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) beat(); });
+  }
+
+  $('#quit').addEventListener('click', async () => {
+    if (!window.confirm('Close Bookkeeping? Any unsaved edits in this pane are lost.')) return;
+    if (timer) clearInterval(timer);
+    try { await api('/api/quit', { method: 'POST' }); } catch { /* the server going away is the point */ }
+    $('#farewell').hidden = false;
+  });
+}
+
 /* --------------------------------------------------------------------- wire */
 
 function initTheme() {
@@ -710,6 +747,7 @@ function init() {
 
   loadCategories().then(loadReceipts);
   api('/api/engines').then(renderEnginePill).catch(() => {});
+  initDesktopLifetime();
 }
 
 document.addEventListener('DOMContentLoaded', init);
