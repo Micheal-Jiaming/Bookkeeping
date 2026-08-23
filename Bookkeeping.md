@@ -13,7 +13,7 @@ reasoning behind it, the exact commands, what has been verified and what has
 not, and the history of fixes that must not be regressed.
 
 - **Location:** `D:\claude\Bookkeeping`
-- **Version:** 1.0.0 (see `VERSION`)
+- **Version:** 1.0.1 (see `VERSION`)
 - **Stack:** Python 3.13 · FastAPI · SQLite · vanilla-JS single-page UI
 - **Recognition:** Claude vision (`claude-opus-5`) primary, Tesseract OCR fallback
 - **Locale:** USD-primary, English UI (currency stored per receipt)
@@ -350,7 +350,7 @@ noting the fallback in the review flags. `claude` and `tesseract` pin one engine
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.0.0` |
+| `VERSION` | 1 | `1.0.1` |
 | `requirements.txt` | 17 | pinned to the versions actually installed and tested |
 | `run.bat` | 29 | one-command launcher (creates venv on first run) |
 | `.gitignore` / `.gitattributes` | 9 / 1 | `data/`, `.venv/`, caches ignored; `* -text` |
@@ -367,7 +367,7 @@ noting the fallback in the review flags. `claude` and `tesseract` pin one engine
 | `app/extract/claude_vision.py` | 207 | Claude vision engine, pricing table, error mapping |
 | `app/extract/tesseract_ocr.py` | 351 | Tesseract engine + heuristic receipt-text parser |
 | `app/extract/__init__.py` | 80 | engine registry and fallback order |
-| `app/static/index.html` | 218 | the single page |
+| `app/static/index.html` | 221 | the single page |
 | `app/static/app.js` | 715 | all front-end behaviour, no dependencies |
 | `app/static/styles.css` | 295 | light/dark colour roles, layout, chart CSS |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt generator with known values |
@@ -401,6 +401,9 @@ Verified on this machine (Windows 11, Python 3.13.11), 2026-08-23:
   monthly columns with correct proportions), categories/rules (15 categories, 59
   rules), settings, both colour modes, and a clean console.
 - Upload normalisation: a 3000×4000 PNG is stored downscaled to 1568px.
+- **`run.bat` itself was executed**: it reused the existing `.venv`, started
+  uvicorn on port 8765, opened the browser, and created `data/bookkeeping.db`
+  with the seeded categories and rules from scratch.
 
 **Not verified, and honestly so:**
 
@@ -517,3 +520,4 @@ Ranked by how much they would improve the daily experience:
 | Version | Date | Change |
 | --- | --- | --- |
 | 1.0.0 | 2026-08-23 | First version. Research of Receipt Wrangler / Budget Lens / Firefly III; Claude-vision + Tesseract engines behind one interface; rules-then-model categorisation; arithmetic validation and review workflow; FastAPI + SQLite backend; single-page UI with reports and CSV export; 69 tests. |
+| 1.0.1 | 2026-08-23 | Inline data-URI favicon, so a browser's automatic `/favicon.ico` request stops logging a 404 that looks like a fault. |
