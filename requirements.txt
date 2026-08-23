@@ -1,0 +1,17 @@
+# Versions are the ones actually installed and tested in .venv on 2026-08-23.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+pydantic==2.13.4
+anthropic==1.0.0
+pillow==12.3.0
+
+# Optional: offline OCR fallback. pytesseract is only a wrapper -- it also needs
+# the Tesseract binary installed (https://github.com/UB-Mannheim/tesseract/wiki).
+# The application runs without either; the Tesseract engine just reports itself
+# as unavailable.
+pytesseract==0.3.13
+
+# Test-only
+pytest==9.1.1
+httpx==0.28.1

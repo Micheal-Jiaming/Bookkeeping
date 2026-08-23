@@ -1,0 +1,9 @@
+# Rebuildable or machine-specific; never versioned.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# The user's own books, receipt images and API key. Personal data, not source.
+data/
+sample-receipt.png
