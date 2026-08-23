@@ -210,6 +210,11 @@ DEFAULT_SETTINGS = {
     "currency": "USD",
     "tesseract_cmd": "",              # explicit path to tesseract.exe if not on PATH
     "auto_confirm_clean": "0",        # 1 = skip review when validation is clean
+    # Interface state. Kept here rather than in a separate config file so a
+    # portable copy carries its own appearance with the books.
+    "theme": "dark",                  # dark | light
+    "window_geometry": "",            # last size and position, e.g. 1180x760+120+80
+    "last_page": "receipts",
     "schema_version": str(SCHEMA_VERSION),
 }
 

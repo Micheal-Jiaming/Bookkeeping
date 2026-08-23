@@ -7,47 +7,38 @@ Build with `build.bat`, or:
 Notes that were learned the hard way, so they do not get "cleaned up" later:
 
 * Paths are built from SPECPATH so the project folder can be moved or renamed.
-* `app/static` and `VERSION` are bundled *under `app/`* because the code looks
-  for them at `sys._MEIPASS/app/...` (see app/paths.py:resource_dir).
-* uvicorn loads its protocol/loop implementations by string name at runtime, so
-  PyInstaller's static analysis cannot see them -- they must be listed as hidden
-  imports or the server dies on the first request.
-* `console=False`: this is a browser-UI app, and a stray console window looks
-  like a bug. That is also why app/launcher.py never assumes sys.stdout exists.
+* `VERSION` and the icon are bundled *under `app/`* because the code looks for
+  them at `sys._MEIPASS/app/...` (see app/paths.py:resource_dir).
+* **tkinter must NOT be excluded.** It was on the exclude list while the
+  interface was a web page; leaving it there once the interface became a Tk
+  window produces an .exe that dies instantly with no window and no message.
+* `collect_all` is run for the Anthropic SDK's HTTP stack: those packages carry
+  data files (CA bundle, type metadata) that an import scan misses, and without
+  them the .exe cannot make an API call even though it starts fine.
+* `console=False`: this is a desktop app, and a console window flashing behind
+  it looks like a fault. That is also why app/launcher.py never assumes
+  sys.stdout exists and reports fatal errors with a message box.
 """
 
 import os
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all
 
 SCRIPT = os.path.join(SPECPATH, 'bookkeeping.py')
 ICON = os.path.join(SPECPATH, 'assets', 'icon.ico')
 
 datas = [
-    (os.path.join(SPECPATH, 'app', 'static'), 'app/static'),
     (os.path.join(SPECPATH, 'VERSION'), 'app'),
+    # The window sets its own title-bar icon from this copy at runtime.
+    (ICON, 'app'),
 ]
 binaries = []
 
-# uvicorn's dynamic imports, plus the optional OCR wrapper (the Tesseract binary
-# itself is not bundled -- it is a separate install, by design).
-hiddenimports = [
-    'uvicorn.logging',
-    'uvicorn.loops.auto',
-    'uvicorn.loops.asyncio',
-    'uvicorn.protocols.http.auto',
-    'uvicorn.protocols.http.h11_impl',
-    'uvicorn.protocols.http.httptools_impl',
-    'uvicorn.protocols.websockets.auto',
-    'uvicorn.protocols.websockets.websockets_impl',
-    'uvicorn.lifespan.on',
-    'uvicorn.lifespan.off',
-    'pytesseract',
-]
-hiddenimports += collect_submodules('uvicorn')
+# pytesseract is imported lazily by the offline OCR engine, so the analysis
+# cannot see it. The Tesseract binary itself is not bundled -- it is a separate
+# install, by design.
+hiddenimports = ['pytesseract']
 
-# The Anthropic SDK and its HTTP stack pull in data files (CA bundle, type
-# metadata) that a plain import scan misses.
 for package in ('anthropic', 'httpx', 'httpcore', 'certifi'):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
@@ -63,9 +54,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Nothing here draws a GUI toolkit or runs tests; leaving them out saves
-    # roughly 10 MB and a slower start.
-    excludes=['tkinter', 'pytest', '_pytest', 'PyInstaller', 'setuptools', 'pip'],
+    # Nothing here runs tests or builds packages; leaving these out saves a few
+    # MB and a slower start. tkinter is deliberately absent from this list.
+    excludes=['pytest', '_pytest', 'PyInstaller', 'setuptools', 'pip',
+              'unittest', 'pydoc_data'],
     noarchive=False,
     optimize=0,
 )

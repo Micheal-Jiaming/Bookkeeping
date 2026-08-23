@@ -1,8 +1,7 @@
 # Versions are the ones actually installed and tested in .venv on 2026-08-23.
-fastapi==0.141.1
-uvicorn[standard]==0.52.4
-python-multipart==0.0.32
-pydantic==2.13.4
+#
+# The interface is Tkinter, which ships with Python -- there is no GUI dependency
+# to install. Since 1.2.0 there is no web framework either.
 anthropic==1.0.0
 pillow==12.3.0
 
@@ -14,7 +13,6 @@ pytesseract==0.3.13
 
 # Test-only
 pytest==9.1.1
-httpx==0.28.1
 
 # Build-only: produces dist\Bookkeeping.exe from Bookkeeping.spec (build.bat
 # installs this on demand, so a machine that only runs the app does not need it).

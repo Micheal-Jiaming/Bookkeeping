@@ -1,11 +1,11 @@
 @echo off
-rem Run Bookkeeping from source (development). For the portable program, build
-rem dist\Bookkeeping.exe with build.bat and run that instead.
+rem Run Bookkeeping from source (development). For the program itself, build
+rem dist\Bookkeeping.exe with build.bat and run that.
 rem
-rem This uses the same entry point as the .exe, so behaviour matches what users
-rem get -- except for --keep-alive, which stops the app from closing itself when
-rem no browser tab is open. That auto-close is right for a desktop program and
-rem wrong for a development server you keep restarting.
+rem This uses the same entry point as the .exe, so what you see here is what
+rem users get. Any arguments are passed straight through:
+rem     run.bat --data-dir C:\temp\books
+rem     run.bat --allow-second-window
 
 setlocal
 cd /d "%~dp0"
@@ -18,7 +18,7 @@ if not exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :failed
 )
 
-".venv\Scripts\python.exe" bookkeeping.py --keep-alive %*
+".venv\Scripts\python.exe" bookkeeping.py %*
 goto :eof
 
 :failed
