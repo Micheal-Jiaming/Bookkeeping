@@ -674,7 +674,7 @@ when done, and check with
 | `app/ui/window.py` | 543 | the window: chrome, menus, navigation, poll loop, dialogs |
 | `app/ui/receipts.py` | 645 | receipt list and the review pane |
 | `app/ui/reports.py` | 355 | tiles, hand-drawn canvas charts, merchant table |
-| `app/ui/theme.py` | 353 | four palettes, display scaling, ttk styling, shared widgets |
+| `app/ui/theme.py` | 356 | four palettes, display scaling, ttk styling, shared widgets |
 | `app/ui/settings_page.py` | 289 | recognition settings |
 | `app/ui/rules.py` | 240 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
@@ -703,13 +703,13 @@ when done, and check with
 | `tests/test_units.py` | 295 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
-| `tests/test_theme.py` | 147 | every palette's contrast and status-distinctness |
+| `tests/test_theme.py` | 157 | every palette's contrast and status-distinctness |
 | `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-9 202 lines of Python. Not in version control: `data/` (the user's books),
+9 215 lines of Python. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---

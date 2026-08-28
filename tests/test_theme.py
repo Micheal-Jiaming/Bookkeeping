@@ -64,9 +64,19 @@ def delta_e(one: str, two: str) -> float:
 
 NAMES = sorted(THEMES)
 
-# (label, foreground key, background key, minimum ratio). The floors follow WCAG:
-# 4.5 for body text, 3.0 for large or bold text and for non-text UI such as a
-# chart bar. Button labels are bold, hence 3.0 rather than 4.5.
+# (label, foreground key, background key, minimum ratio).
+#
+# 4.5 is WCAG AA for body text, and 3.0 is WCAG AA for large or bold text and
+# for non-text UI -- which is what the accent is, filling a chart bar, and what
+# a bold button label is.
+#
+# The 3.0 on the last three rows is a deliberate local relaxation rather than
+# anything WCAG says: hint text and the two status words are small text, so AA
+# would want 4.5. They are held to 3.0 because each is a short, repeated,
+# secondary label sitting beside the same information in full-contrast text, and
+# holding them to 4.5 would force every palette's greys and status colours
+# almost to the body-text colour and flatten the hierarchy. Raising them is a
+# design decision, not a bug fix.
 READABILITY = [
     ("accent on the chart surface", "ACCENT", "CARD", 3.0),
     ("body text on a card", "FG", "CARD", 4.5),

@@ -4,8 +4,9 @@ Tkinter has no theming worth the name, so -- as in the Pomodoro timer -- a theme
 here is a whole palette held in a dict, applied by rebuilding the widgets.
 
 **The accent is the bar colour in the report charts**, so it is not free to be
-whatever looks nice. Every palette here has been checked two ways, and adding a
-sixth means running both checks again:
+whatever looks nice. All four palettes here have been checked two ways, and
+adding a fifth means running both checks again -- ``tests/test_theme.py`` does
+so automatically, for every theme in this table:
 
 1. **Legibility, by WCAG contrast ratio** -- accent on the chart surface >= 3:1,
    body text >= 4.5:1, hint text >= 3:1. Measured on the surface that palette
@@ -97,8 +98,10 @@ THEMES: dict[str, dict[str, str]] = {
         DIM="#758787",
         GRID="#ded7c3",
         AXIS="#b9b3a1",
-        # Deepened from Solarized's blue (#268bd2, only 2.9:1 here) so the chart
-        # bars carry their weight against the cream surface.
+        # Deepened from Solarized's own blue, #268bd2. That one is not a failure
+        # -- it reaches 3.41:1 on this cream card and would pass the 3:1 floor --
+        # but only just, and a bar of it looks washed out beside the darker text.
+        # #1f6f9c is 5.11:1, which is a choice for weight rather than a fix.
         ACCENT="#1f6f9c",
         ACCENT_HOVER="#17587c",
         ON_ACCENT="#ffffff",
