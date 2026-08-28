@@ -641,18 +641,18 @@ when done, and check with
 | `Bookkeeping.spec` | 93 | PyInstaller build definition, with the reasoning inline |
 | `make_icon.py` | 128 | draws `assets/icon.ico` (a receipt with a torn edge) |
 | `assets/icon.ico` | — | 8 sizes, 16–256 px; generated but tracked, because the build needs it |
-| `.gitignore` / `.gitattributes` | 16 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches ignored; `* -text` |
+| `.gitignore` / `.gitattributes` | 31 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **all receipt images** ignored; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
 | `app/ui/window.py` | 532 | the window: chrome, menus, navigation, poll loop, dialogs |
 | `app/ui/receipts.py` | 645 | receipt list and the review pane |
 | `app/ui/reports.py` | 355 | tiles, hand-drawn canvas charts, merchant table |
 | `app/ui/theme.py` | 292 | palette, display scaling, ttk styling, shared widgets |
-| `app/ui/settings_page.py` | 288 | recognition settings |
+| `app/ui/settings_page.py` | 289 | recognition settings |
 | `app/ui/rules.py` | 240 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
 | `app/pipeline.py` | 301 | scan orchestration, thread pool, engine fallback |
-| `app/db.py` | 456 | schema, seed categories and rules, migrations, connections |
+| `app/db.py` | 459 | schema, seed categories and rules, migrations, connections |
 | `app/launcher.py` | 157 | data folder, logging, single-instance lock, error reporting |
 | `app/categorize.py` | 131 | the precedence chain and rule matching |
 | `app/validate.py` | 126 | arithmetic and sanity checks → review flags |
@@ -660,11 +660,11 @@ when done, and check with
 | `app/money.py` | 66 | integer-cent money conversion |
 | `app/images.py` | 66 | image normalisation (EXIF, downscale, PNG) |
 | `app/settings_store.py` | 60 | settings read/write, secret masking |
-| `app/extract/receipt_text.py` | 265 | shared: receipt text → `ExtractedReceipt` |
+| `app/extract/receipt_text.py` | 269 | shared: receipt text → `ExtractedReceipt` |
 | `app/extract/windows_ocr.py` | 257 | Windows OCR engine + word-box row reconstruction |
 | `app/extract/claude_vision.py` | 207 | Claude vision engine, pricing table, error mapping |
 | `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
-| `app/extract/tesseract_ocr.py` | 107 | Tesseract engine (parser now shared) |
+| `app/extract/tesseract_ocr.py` | 112 | Tesseract engine (parser now shared) |
 | `app/extract/__init__.py` | 89 | engine registry and fallback order |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
 | `tools/verify_exe.py` | 218 | drives the built .exe and checks it behaves (§7) |
@@ -681,7 +681,7 @@ when done, and check with
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-8 960 lines of Python. Not in version control: `data/` (the user's books),
+8 973 lines of Python. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---

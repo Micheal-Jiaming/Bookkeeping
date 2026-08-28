@@ -21,7 +21,8 @@ which is the shape ``receipt_text.parse_receipt_text`` already knows how to
 read.
 
 Two decisions here came from measurement rather than taste, and are recorded in
-Bookkeeping.md section 11:
+Bookkeeping.md -- the row tolerance in section 2, the preprocessing result in
+section 10:
 
 * **The row tolerance is half the median word height**, which is the constant
   docTR uses in ``models/builder.py`` for the same job. A fraction of the text
@@ -44,6 +45,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..money import to_cents
 from .base import ExtractionError, ExtractionResult, Extractor
 from .receipt_text import parse_receipt_text
 
@@ -242,8 +244,6 @@ def _confidence(receipt) -> float:
     reading that found a total, and whose line items add up to the printed
     subtotal, got the layout right. One that did not, did not.
     """
-    from ..money import to_cents  # noqa: PLC0415 - avoids an import cycle at module load
-
     score = 0.2
     if receipt.total:
         score += 0.1

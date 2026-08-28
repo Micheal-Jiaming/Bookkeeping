@@ -148,7 +148,7 @@ BUILTIN_CATEGORIES: list[tuple[str, str, int]] = [
 # Two kinds of pattern are safe to seed here and a third is not:
 #   * generic product nouns ("MOP", "AMMONIA"), which name a category directly;
 #   * product brands that sell one kind of thing ("LYSOL", "PAMPERS");
-#   * NOT store brands -- see the note above about "GREAT VALUE".
+#   * NOT store brands -- see the note on BUILTIN_RULES below about "GREAT VALUE".
 #
 # Patterns are matched as substrings, so anything that hides inside a longer
 # ordinary word is left out however useful it looks: "GAIN" is a laundry brand
@@ -415,8 +415,11 @@ def _seed_categories(db: sqlite3.Connection) -> None:
 
 
 def _seed_rules(db: sqlite3.Connection) -> None:
-    # Only seed on a fresh database. Re-inserting built-ins on every start would
-    # resurrect rules the user deliberately deleted.
+    # Seed only when no built-in rule survives. Re-inserting them on every start
+    # would resurrect rules the user deliberately deleted -- which is also why
+    # the test is "are there any built-ins left?" rather than "is this database
+    # new?": a user who deleted every one of them does get them back, but a user
+    # who deleted some keeps their choices.
     existing = db.execute(
         "SELECT COUNT(*) AS n FROM category_rule WHERE is_builtin = 1"
     ).fetchone()["n"]

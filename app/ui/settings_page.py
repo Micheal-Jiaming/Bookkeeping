@@ -257,8 +257,9 @@ def _ocr_languages() -> list[str]:
     """Language tags Windows can recognise, e.g. ['en-GB', 'zh-Hans-CN'].
 
     Which packs are installed is a property of the machine, not of this program,
-    so the list is read at build time rather than hard-coded. Any failure here is
-    not worth an error dialog: the dropdown simply offers Automatic only.
+    so the list is read when the page is built on the user's own computer rather
+    than hard-coded here. Any failure is not worth an error dialog: the dropdown
+    simply offers Automatic only.
     """
     try:
         from winrt.windows.media.ocr import OcrEngine  # noqa: PLC0415

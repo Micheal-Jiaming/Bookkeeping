@@ -140,6 +140,10 @@ def _find_date(lines: list[str]) -> str | None:
                     month, day, year = (int(g) for g in match.groups())
                 else:
                     month, day, short_year = (int(g) for g in match.groups())
+                    # The POSIX two-digit-year convention: 00-68 is this century
+                    # and 69-99 the last. Widened to 79 here because a till roll
+                    # is never decades old -- a receipt reading "/70" is far more
+                    # likely a misread of a recent year than a purchase in 1970.
                     year = 2000 + short_year if short_year <= 79 else 1900 + short_year
                 if month > 12 and day <= 12:
                     # A DD/MM receipt slipped through; swap rather than fail.

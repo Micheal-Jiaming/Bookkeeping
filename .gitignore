@@ -22,6 +22,10 @@ sample-receipt.png
 # (tests/fixtures/walmart_ocr_words.json, tests/test_real_receipt.py) rather than
 # as the photograph itself -- the tests get the same regression cover, and
 # nothing personal is published.
-/*.jpg
-/*.jpeg
-/*.png
+# Unanchored on purpose: `tools\screenshot_pages.py` and `verify_exe.py --out`
+# both write PNGs into a subdirectory (`shots\` by default), which is exactly
+# where a root-only rule would stop protecting anything.
+*.jpg
+*.jpeg
+*.png
+!assets/icon-preview.png

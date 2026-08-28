@@ -1,13 +1,18 @@
 """Offline engine: Tesseract OCR, feeding the shared receipt-text parser.
 
-Tesseract is the most accurate of the two offline engines when it is installed
-and the image is clean, but it is a separate ~60 MB install that this
-application cannot ship. When it is absent the Windows OCR engine takes over --
-see ``windows_ocr.py`` -- so the offline path still works out of the box.
+The optional third engine, and the last one tried. In ``auto`` mode the order is
+Claude, then Windows OCR, then this -- so Tesseract is reached only if the
+engine built into Windows fails, and a machine without Tesseract loses nothing,
+because ``windows_ocr.py`` already covers the offline case with no install at
+all. It stays for anyone who has installed it and would rather use it, and it
+can be pinned outright in Settings.
 
-Either way the reading is genuinely worse than the vision model and the code
-does not pretend otherwise: it reports a capped confidence, so every receipt it
-reads lands in the review queue instead of being auto-confirmed.
+No claim is made here about which offline engine reads a receipt better:
+Tesseract has never run in this project's environment, so there is nothing
+honest to base one on. What is certain is that both are worse than the vision
+model, and the code does not pretend otherwise -- each reports a capped
+confidence, so every receipt an offline engine reads lands in the review queue
+instead of being auto-confirmed.
 """
 
 from __future__ import annotations
