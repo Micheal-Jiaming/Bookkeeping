@@ -1,15 +1,26 @@
 """Colours, fonts and the handful of shared widgets the pages are built from.
 
 Tkinter has no theming worth the name, so -- as in the Pomodoro timer -- a theme
-here is a whole palette held in a dict, applied by rebuilding the widgets. The
-colours are the same ones the previous browser interface used, which matters for
-one specific reason: the accent is the bar colour in the report charts, and it
-was validated against **both** surfaces (lightness band, chroma floor, and >= 3:1
-contrast) for light `#2a78d6` on `#fcfcfb` and dark `#3987e5` on `#1a1a19`.
-Substituting a prettier blue means re-running that check.
+here is a whole palette held in a dict, applied by rebuilding the widgets.
 
-Status colours (good / warning / critical) are deliberately the same in both
-modes and are never reused as a data colour.
+**The accent is the bar colour in the report charts**, so it is not free to be
+whatever looks nice. Every palette here has been checked two ways, and adding a
+sixth means running both checks again:
+
+1. **Legibility, by WCAG contrast ratio** -- accent on the chart surface >= 3:1,
+   body text >= 4.5:1, hint text >= 3:1. Measured on the surface that palette
+   actually uses, not a generic white or black.
+2. **Confusability with the status colours, by OKLab delta-E >= 15.** Contrast
+   ratio is the wrong instrument for this second question and will mislead:
+   `#0a4fa8` and `#a8001b` sit at 1.01:1 because they are equally *dark*, while
+   being obviously different colours. Distinctness is a hue question.
+
+Accent on chart surface, as measured: dark 4.79:1, light 4.30:1, dracula 5.90:1,
+solarized 5.11:1. Nearest accent-to-status distance: 30.7, 29.4, 21.4, 20.1.
+
+Status colours (good / warning / critical) are tuned per palette so they stay
+legible on that surface, but they are never reused as a data colour -- which is
+the reason for check 2.
 """
 
 from __future__ import annotations
@@ -55,8 +66,58 @@ THEMES: dict[str, dict[str, str]] = {
         BAD="#c02c2c",
         ENTRY="#ffffff",
     ),
+    "dracula": dict(
+        BG="#1e1f29",
+        CARD="#282a36",
+        CARD_ALT="#343746",
+        FG="#f8f8f2",
+        MUTED="#cfcfe0",
+        DIM="#8f93a8",
+        GRID="#343746",
+        AXIS="#4a4d63",
+        ACCENT="#bd93f9",
+        ACCENT_HOVER="#d0b0ff",
+        # Violet is light enough that white button text would be unreadable on
+        # it; the page background doubles as the "on accent" ink instead.
+        ON_ACCENT="#1e1f29",
+        GOOD="#50fa7b",
+        WARN="#f1fa8c",
+        BAD="#ff6e6e",
+        ENTRY="#21222c",
+    ),
+    "solarized": dict(
+        BG="#eee8d5",
+        CARD="#fdf6e3",
+        CARD_ALT="#e8e1cd",
+        FG="#073642",
+        MUTED="#4d6b73",
+        # Solarized's own base1 (#93a1a1) is the obvious choice here and is
+        # wrong: it manages 2.48:1 on this cream card, too faint for the hint
+        # text DIM is used for. Darkened until it cleared 3:1.
+        DIM="#758787",
+        GRID="#ded7c3",
+        AXIS="#b9b3a1",
+        # Deepened from Solarized's blue (#268bd2, only 2.9:1 here) so the chart
+        # bars carry their weight against the cream surface.
+        ACCENT="#1f6f9c",
+        ACCENT_HOVER="#17587c",
+        ON_ACCENT="#ffffff",
+        GOOD="#4d7a00",
+        WARN="#a35b00",
+        BAD="#c0362c",
+        ENTRY="#fffbf0",
+    ),
 }
-THEME_ORDER = ("dark", "light")
+
+# The order the Theme button cycles through. Dark themes first, then light, so
+# one press never jumps between a bright and a dark window.
+THEME_ORDER = ("dark", "dracula", "light", "solarized")
+THEME_LABELS = {
+    "dark": "Dark",
+    "dracula": "Dracula",
+    "light": "Light",
+    "solarized": "Solarized",
+}
 DEFAULT_THEME = "dark"
 
 

@@ -46,7 +46,12 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=Path("shots"))
     parser.add_argument("--data-dir", type=Path,
                         help="Books to open (default: the app's usual data folder).")
-    parser.add_argument("--theme", choices=("dark", "light"),
+    # Deliberately not an argparse `choices=` list. Reading the theme names
+    # requires importing app.ui, which imports app.db, which resolves the data
+    # folder at import time -- and a parser is built before --data-dir has been
+    # read, so doing it there silently points the whole run at the default books.
+    # The name is validated below instead, once the environment is set up.
+    parser.add_argument("--theme",
                         help="Force a theme instead of using the saved one.")
     parser.add_argument("--pages", default=",".join(PAGES),
                         help=f"Comma-separated subset of {','.join(PAGES)}.")
@@ -64,7 +69,12 @@ def main() -> int:
         return 2
 
     from app.db import init_db
+    from app.ui.theme import THEME_ORDER
     from app.ui.window import MainWindow, _enable_dpi_awareness
+
+    if args.theme and args.theme not in THEME_ORDER:
+        print(f"Unknown theme {args.theme!r}. Available: {', '.join(THEME_ORDER)}")
+        return 2
 
     _enable_dpi_awareness()
     init_db()

@@ -21,7 +21,7 @@ from pathlib import Path
 from .. import paths, pipeline, settings_store, store
 from ..db import DATA_DIR, init_db
 from ..extract import engine_status
-from .theme import THEME_ORDER, Button, Pill, Theme, ui_scale
+from .theme import THEME_LABELS, THEME_ORDER, Button, Pill, Theme, ui_scale
 
 log = logging.getLogger("bookkeeping.ui")
 
@@ -160,7 +160,18 @@ class MainWindow:
             view_menu.add_command(label=f"{label}   Ctrl+{index}",
                                   command=lambda k=key: self.show(k))
         view_menu.add_separator()
-        view_menu.add_command(label="Switch light / dark", command=self.cycle_theme)
+        # A submenu rather than the old "Switch light / dark" command: with four
+        # palettes, cycling blindly to reach the one you want is no way to pick.
+        # The radio marks also answer "which am I looking at?", which the header
+        # button alone never could.
+        theme_menu = tk.Menu(view_menu, tearoff=0, **menu_kwargs)
+        self._theme_choice = tk.StringVar(value=self.theme.name)
+        for key in THEME_ORDER:
+            theme_menu.add_radiobutton(
+                label=THEME_LABELS.get(key, key.title()), value=key,
+                variable=self._theme_choice,
+                command=lambda k=key: self.set_theme(k))
+        view_menu.add_cascade(label="Theme", menu=theme_menu)
         view_menu.add_command(label="Refresh   F5", command=self.refresh)
         bar.add_cascade(label="View", menu=view_menu)
 

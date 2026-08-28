@@ -18,7 +18,7 @@ reasoning behind it, the exact commands, what has been verified and what has
 not, and the history of fixes that must not be regressed.
 
 - **Location:** `D:\claude\Bookkeeping`
-- **Version:** 1.3.0 (see `VERSION`)
+- **Version:** 1.4.0 (see `VERSION`)
 - **Ships as:** `dist\Bookkeeping.exe` — one file, 29.2 MB, Windows x64, no installer
 - **Stack:** Python 3.13 · **Tkinter** · SQLite · PyInstaller
 - **Recognition:** Claude vision (`claude-opus-5`) primary; Windows' built-in OCR offline, needing no key or install; Tesseract optional
@@ -425,14 +425,41 @@ screen, `Ctrl+V` in Bookkeeping. It also accepts files copied in Explorer.
 ### Look and scaling
 
 A theme is a whole palette in a dict, applied by rebuilding the widgets — the
-same approach the Pomodoro timer uses, because Tk has no real theming. Dark is
-the default; light is the other, chosen for its own surface rather than derived
-by inverting.
+same approach the Pomodoro timer uses, because Tk has no real theming. Each is
+designed for its own surface rather than derived by inverting another. There are
+four, picked from a set of five candidates rendered in the real window:
 
-The accent is the chart bar colour, and it was validated against **both**
-surfaces (lightness band, chroma floor, ≥ 3:1 contrast): light `#2a78d6` on
-`#fcfcfb`, dark `#3987e5` on `#1a1a19`. Substituting a prettier blue means
-re-running that check.
+| Theme | | Accent | Accent on chart surface |
+| --- | --- | --- | --- |
+| **Dark** | the default | `#3987e5` | 4.79:1 |
+| **Dracula** | dark violet | `#bd93f9` | 5.90:1 |
+| **Light** | | `#2a78d6` | 4.30:1 |
+| **Solarized** | warm cream | `#1f6f9c` | 5.11:1 |
+
+Pick one from **View → Theme**, which marks the active one; the header's *Theme*
+button cycles. The cycle order runs dark themes first and then light ones, so a
+single press never flips the screen brightness — `tests/test_theme.py` asserts
+that, and asserts the crossing happens exactly once.
+
+**The accent is the chart bar colour, so it is not a free choice.** Every palette
+is checked two ways, and both checks must be re-run when one is added or edited:
+
+1. **Legibility, by WCAG contrast ratio** — accent on that palette's own chart
+   surface ≥ 3:1, body text ≥ 4.5:1, hint text and bold button labels ≥ 3:1.
+2. **Confusability with the reserved status colours, by OKLab ΔE ≥ 15.**
+
+Using contrast for the second question is a trap worth naming: `#0a4fa8` and
+`#a8001b` score 1.01:1 because they are equally *dark*, while being obviously
+different colours. Distinctness is a hue question, and needs a perceptual metric.
+Both checks now run in `tests/test_theme.py` against every theme, including any
+added later — they were done by hand originally, which is exactly the sort of
+step that quietly stops happening.
+
+Two candidate palettes were changed by those measurements rather than by taste:
+a *Forest* theme's teal accent sat only ΔE 8.2 from its own green "good" status,
+so chart bars would have read as a status colour, and Solarized's own `#93a1a1`
+manages just 2.48:1 as hint text on cream. Forest was not among the two chosen,
+but the finding is why the check exists.
 
 Charts follow the same data-visualisation rules as before: each shows **one
 measure, so one hue**; the row label (category) or axis (month) carries identity,
@@ -633,7 +660,7 @@ when done, and check with
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.3.0` |
+| `VERSION` | 1 | `1.4.0` |
 | `requirements.txt` | 31 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
@@ -644,10 +671,10 @@ when done, and check with
 | `.gitignore` / `.gitattributes` | 31 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **all receipt images** ignored; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
-| `app/ui/window.py` | 532 | the window: chrome, menus, navigation, poll loop, dialogs |
+| `app/ui/window.py` | 543 | the window: chrome, menus, navigation, poll loop, dialogs |
 | `app/ui/receipts.py` | 645 | receipt list and the review pane |
 | `app/ui/reports.py` | 355 | tiles, hand-drawn canvas charts, merchant table |
-| `app/ui/theme.py` | 292 | palette, display scaling, ttk styling, shared widgets |
+| `app/ui/theme.py` | 353 | four palettes, display scaling, ttk styling, shared widgets |
 | `app/ui/settings_page.py` | 289 | recognition settings |
 | `app/ui/rules.py` | 240 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
@@ -670,18 +697,19 @@ when done, and check with
 | `tools/verify_exe.py` | 218 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
 | `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
-| `tools/screenshot_pages.py` | 114 | opens the window and screenshots every page |
+| `tools/screenshot_pages.py` | 124 | opens the window and screenshots every page |
 | `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
 | `tests/test_ui.py` | 471 | builds the real window and drives it |
 | `tests/test_units.py` | 295 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
+| `tests/test_theme.py` | 147 | every palette's contrast and status-distinctness |
 | `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-8 973 lines of Python. Not in version control: `data/` (the user's books),
+9 202 lines of Python. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -691,7 +719,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23 and again 2026-08-29 for 1.3.0:
 
-**Automated — 161 tests pass** (`pytest tests/ -q`, ~54 s):
+**Automated — 221 tests pass** (`pytest tests/ -q`, ~51 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -736,7 +764,7 @@ Python, no venv, no source) — re-run for 1.3.0 with `tools\verify_exe.py`:
 - **Closing the window exits cleanly** (code 0), and `--version` afterwards
   prints `1.3.0` — proving the lock was released.
 - Startup measured at **3.4–3.6 s** to a visible window, over three runs.
-- The four pages and both themes were screenshotted from the running program and
+- The four pages and every theme were screenshotted from the running program and
   inspected: list, review pane with the image and a real arithmetic flag, charts
   with correct proportions and value labels, 15 categories and 59 rules, and the
   settings controls.
@@ -1055,6 +1083,23 @@ The state as of 1.3.0, for whoever reads this next:
     containing letters and returned "Items Sold 21". Summary lines are now skipped
     before that fallback runs; saying nothing is the correct answer
     (`app/extract/receipt_text.py`).
+25. **A tool must set `BOOKKEEPING_DATA` before it imports anything from `app`.**
+    `app/db.py` resolves the data folder at *import* time, and importing any
+    submodule of `app.ui` pulls in `app/ui/__init__.py` -> `window.py` -> `app.db`.
+    Reading the theme list to build an argparse `choices=` list therefore
+    imported the whole application before `--data-dir` had even been parsed, and
+    silently pointed the run at the default books: the screenshots came out
+    correct in every visible respect except that the reports were empty. The
+    theme name is validated after the environment is set up instead
+    (`tools/screenshot_pages.py`).
+26. **A theme is not free to be any colour.** The accent fills the report bars,
+    so each palette is checked for contrast on its own surface and for OKLab
+    distance from the status colours. Do not judge the second with a contrast
+    ratio: equally-dark colours of different hue score ~1:1 and look identical to
+    that metric while being obviously different. `tests/test_theme.py` enforces
+    both for every theme, so a palette added later cannot skip the check
+    (`app/ui/theme.py`, `tests/test_theme.py`).
+
 24. **A verification tool that cries wolf is worse than none.** `verify_exe.py`
     shelled out to PowerShell once per process-tree node *per poll*; under the
     disk load right after a build the loop ran so rarely that it missed an
@@ -1140,3 +1185,4 @@ Ranked by how much they would improve the daily experience:
 | 1.2.1 | 2026-08-23 | First real receipt read end to end (§9). Removed the seeded `GREAT VALUE` rule — a brand, not a category — with a migration for books that already exist, and kept the receipt as a permanent 12-test fixture. Settings now shows measured costs instead of estimates. 134 tests. |
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
+| 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
