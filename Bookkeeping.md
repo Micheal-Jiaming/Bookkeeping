@@ -18,7 +18,7 @@ reasoning behind it, the exact commands, what has been verified and what has
 not, and the history of fixes that must not be regressed.
 
 - **Location:** `D:\claude\Bookkeeping`
-- **Version:** 1.4.0 (see `VERSION`)
+- **Version:** 1.4.1 (see `VERSION`)
 - **Ships as:** `dist\Bookkeeping.exe` — one file, 29.2 MB, Windows x64, no installer
 - **Stack:** Python 3.13 · **Tkinter** · SQLite · PyInstaller
 - **Recognition:** Claude vision (`claude-opus-5`) primary; Windows' built-in OCR offline, needing no key or install; Tesseract optional
@@ -291,10 +291,19 @@ win would reasonably think it was broken:
 review pane as `rule` / `model` / `shop` / `you`), and the rule backfill respects
 it.
 
-59 keyword rules and 15 categories are seeded on first run (`app/db.py`), tuned
-for US retail receipts — `GREAT VALUE`, `MARKETSIDE`, `TIDE`, `DIAPER`,
-`UNLEADED`, plus merchant defaults (`WALMART`, `COSTCO`, `CVS`, `SHELL`, …). They
-are seeded **only on a fresh database**, so rules the user deletes stay deleted.
+113 keyword rules and 15 categories are seeded on first run (`app/db.py`),
+tuned for US retail receipts: product nouns (`MOP`, `AMMONIA`, `DIAPER`,
+`UNLEADED`), single-category brands (`TIDE`, `LYSOL`, `PAMPERS`, `CLX`), and
+merchant defaults (`WALMART`, `COSTCO`, `CVS`, `SHELL`, …). **No store-brand
+pattern is among them** — `GREAT VALUE` was seeded originally and had to be
+removed, for the reason in §11.18.
+
+Seeding fires only when **no built-in rule survives**, so rules the user deletes
+stay deleted. That is not the same as "only on a new database", and the
+difference is deliberate: a user who deleted every built-in gets them back, one
+who deleted some keeps their choices. New built-ins added in a later version
+therefore need a migration to reach existing books — schema v3 does exactly that
+for the 55 abbreviation rules, skipping any pattern the user already has.
 
 `Uncategorized` is withheld from the list offered to the model: it is this
 application's marker for "nothing decided", and offering it invites the model to
@@ -400,6 +409,8 @@ window packs and refreshes them and knows nothing else about them.
 ## 6. The interface
 
 One window, four pages, a menu bar (File / View / Help) and a status bar.
+Themes are chosen from **View → Theme**, which marks the active one; the
+*Theme* button in the header cycles through them.
 
 - **Receipts** — the workspace. Toolbar (*Add receipt images*, *Paste image*,
   *Add by hand*, status filter, search), the receipt list on the left, and the
@@ -660,7 +671,7 @@ when done, and check with
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.4.0` |
+| `VERSION` | 1 | `1.4.1` |
 | `requirements.txt` | 31 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
@@ -717,7 +728,7 @@ when done, and check with
 ## 9. What has and has not been verified
 
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
-2026-08-23 and again 2026-08-29 for 1.3.0:
+2026-08-23, and again on 2026-08-29 for 1.3.0 and 1.4.0:
 
 **Automated — 221 tests pass** (`pytest tests/ -q`, ~51 s):
 
@@ -741,6 +752,12 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   bundled-resource paths under a simulated `sys._MEIPASS`, the single-instance
   lock (same folder refused, two folders both allowed, released on exit), and
   logging to the data folder.
+- **Every theme's colours** (`tests/test_theme.py`, 60 tests): each palette is
+  complete and well-formed; the accent clears 3:1 on that palette's own chart
+  surface and every text pair clears its floor; the accent is at least ΔE 15
+  from each status colour; and the cycle order crosses from dark to light
+  exactly once. These run against *every* theme, so one added later cannot skip
+  the check.
 - **Windows OCR layout handling** (`tests/test_windows_ocr.py`, 22 tests): rows
   are rebuilt top-to-bottom and left-to-right from the stored word boxes; the
   grouping is proved scale-invariant (the same words at 4× the size group
@@ -749,9 +766,9 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   description; and the reading of the real receipt is asserted end to end.
 
 **By hand, against the built `Bookkeeping.exe` copied to an empty folder** (no
-Python, no venv, no source) — re-run for 1.3.0 with `tools\verify_exe.py`:
+Python, no venv, no source) — re-run for 1.4.0 with `tools\verify_exe.py`:
 
-- It opens a window titled `Bookkeeping 1.3.0`, class `TkTopLevel`, with the
+- It opens a window titled `Bookkeeping 1.4.0`, class `TkTopLevel`, with the
   receipt icon in the title bar and the File/View/Help menus.
 - It creates `data\bookkeeping.db` (60 KB, seeded) and `data\bookkeeping.log`
   beside itself.
@@ -762,12 +779,16 @@ Python, no venv, no source) — re-run for 1.3.0 with `tools\verify_exe.py`:
   `app/ui/window.py` exists for.
 - A **second launch is refused** with an "Already running" dialog and exits 0.
 - **Closing the window exits cleanly** (code 0), and `--version` afterwards
-  prints `1.3.0` — proving the lock was released.
+  prints `1.4.0` — proving the lock was released.
 - Startup measured at **3.4–3.6 s** to a visible window, over three runs.
 - The four pages and every theme were screenshotted from the running program and
   inspected: list, review pane with the image and a real arithmetic flag, charts
-  with correct proportions and value labels, 15 categories and 59 rules, and the
+  with correct proportions and value labels, 15 categories and 113 rules, and the
   settings controls.
+- **Both themes added in 1.4.0 were confirmed from the frozen build**, not only
+  from source: the stored theme was set in a portable copy's own books, the .exe
+  relaunched, and the window it drew photographed. Dracula and Solarized both
+  rendered correctly at `Bookkeeping 1.4.0`.
 
 **One real receipt, read and measured** (2026-08-23). The user photographed a
 Walmart receipt — 24 printed lines, real abbreviations (`GV TWIST MOP`,
@@ -879,28 +900,41 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.3.0, for whoever reads this next:
+The state as of 1.4.0, for whoever reads this next:
 
-- **The application works with nothing configured.** That is new in 1.3.0 and is
-  the single most important fact here: before it, a fresh copy could not read a
-  receipt at all without an API key or a Tesseract install, and the first real
-  receipt it was ever given failed with four red flags and no data.
+- **The application works with nothing configured**, which is the single most
+  important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
+  without an API key or a Tesseract install, and the first real receipt it was
+  ever given failed with four red flags and no data. Windows' own OCR now covers
+  that case on any Windows 10/11 machine.
+- **Everything is committed, tagged `v1.4.0`, and pushed** to both `origin`
+  (private GitHub) and `mirror`. `dist\Bookkeeping.exe` is built from that commit
+  and passes `tools\verify_exe.py`.
 - **The two open verifications**, in order of value:
-  1. **A live API call.** Put a real key in Settings, add the receipt photo, and
-     compare against the fixture in `tests/test_real_receipt.py` (merchant
-     `null`, date `null`, subtotal 141.94, tax 7.50, total 149.44, 24 lines). If
-     it matches, the last real gap closes. If it does not, the difference is the
-     most interesting data this project can produce.
-  2. **A second real receipt through the offline engine.** Everything known about
-     Windows OCR accuracy comes from one photograph. A restaurant bill, a fuel
-     receipt or a faded one would each say something the current fixture cannot.
-- **The next feature worth building** is in §13: more real receipts. One found a
-  mis-categorisation bug within minutes; another would likely find its own.
+  1. **A live API call.** No Anthropic key has ever been used here, so the
+     primary engine — the whole reason the app exists — is exercised only against
+     a local stand-in. What is proven is that the app handles a reply correctly,
+     not that the model reads a receipt correctly. Put a real key in Settings,
+     add the receipt photo, and compare against the fixture in
+     `tests/test_real_receipt.py` (merchant `null`, date `null`, subtotal 141.94,
+     tax 7.50, total 149.44, 24 lines). If it matches, the last real gap closes;
+     if it does not, the difference is the most interesting data this project can
+     produce.
+  2. **More real receipts.** Everything known about offline accuracy comes from
+     one photograph: 20 of 24 lines, 12 of 20 categorised, $10.33 of $141.94
+     unaccounted. That is this receipt's number, not an accuracy figure. A
+     restaurant bill, a fuel receipt or a faded one would each say something the
+     current fixture cannot.
+- **The known weakness**, if you are deciding what to build: offline OCR cannot
+  expand an abbreviation, so `CLX PLNGR` categorises only because a keyword rule
+  happens to match. §13.2 (learn a rule from a reviewer's correction) is the
+  cheapest real improvement to that.
 - **Do not** re-add a store-brand keyword rule (§11.18), reintroduce a web
   interface (§10), "simplify" the spec's excludes (§11.11), preprocess the image
-  before Windows OCR (§10 — it was measured, and it makes the reading worse), or
-  let the amount repairs in `windows_ocr.py` fire outside the amount column
-  (§11.21).
+  before Windows OCR (§10 — it was measured, and it makes the reading worse), let
+  the amount repairs in `windows_ocr.py` fire outside the amount column (§11.21),
+  or add a theme without re-running the two colour checks (§11.26 —
+  `tests/test_theme.py` runs them for you).
 - **Editing this file:** it contains U+202F narrow no-break spaces inside figures
   such as "150 %", which silently defeat exact-string edits. Match on lines that
   do not contain them, or patch by line number.
@@ -1123,16 +1157,23 @@ sibling projects under `D:\claude`:
   its `HEAD` points at `main` so a clone checks out).
 - Baseline **1.0.0**. A functional change adds **0.1**, a fix or docs change adds
   **0.0.1**, updated in `VERSION` in the same commit and tagged `v<number>`.
-  Tags: `v1.0.0`, `v1.0.1`, `v1.1.0`, `v1.2.0`, `v1.2.1`, `v1.2.2`, `v1.3.0`.
+  Tags: `v1.0.0`, `v1.0.1`, `v1.1.0`, `v1.2.0`, `v1.2.1`, `v1.2.2`, `v1.3.0`,
+  `v1.4.0`.
 - Tracked: all source, `Bookkeeping.spec`, `build.bat`, `run.bat`, `make_icon.py`
   and `assets/icon.ico` (generated, but the build needs it).
 - Ignored: `data/` (personal), `dist/` and `build/` (regenerable). **Because the
   .exe is not in Git, `build.bat` keeps the previous one as
   `dist\Bookkeeping.previous.exe` — that is the only way back from a bad build.**
 
-No GitHub remote (`origin`) has been created yet — that is a publish-shaped step
-and needs the user's say-so. When they want it: `gh repo create Bookkeeping
---private` under the account `Micheal-Jiaming`.
+`origin` is <https://github.com/Micheal-Jiaming/Bookkeeping>, created 2026-08-29.
+**It is private and stays private** — that is a standing instruction from the
+user, not a default to revisit, so do not offer to make it public.
+
+Receipt photographs are gitignored (`*.jpg`, `*.jpeg`, `*.png`, unanchored so the
+rules cover `shots\` output too, with `!assets/icon-preview.png` for the program
+icon). A real receipt is somebody's shopping, their payment method and often
+their address; the one this project is measured against lives in the tests as OCR
+word boxes and a transcription instead of as an image.
 
 ---
 
@@ -1186,3 +1227,4 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.4.1 | 2026-08-29 | Documentation reconciled against the code (/md-renew-check, full mode). Three errors in the categorisation section: it claimed 59 seeded rules when there are 113, cited `GREAT VALUE` as a seeded example after that rule was deliberately removed in schema v2, and said rules seed "only on a fresh database" when the guard is really "no built-in rule survives" and v3 migrates new rules into existing books. Also: the handoff section still described 1.3.0, the tag list and .exe verification figures were a release behind, the 60 theme tests were missing from the verified list, and the version-control section still said no GitHub remote existed. No code changed. |
