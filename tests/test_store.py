@@ -136,6 +136,45 @@ def test_an_existing_database_loses_the_bad_store_brand_rule(books):
     assert remaining[0]["is_builtin"] == 0, "only the built-in copy is removed"
 
 
+def test_an_existing_database_gains_the_abbreviation_rules(books):
+    """Version 3 must reach books made before the offline engine existed.
+
+    Same reasoning as the migration above, in the opposite direction: seeding
+    only fires on an empty database, so without this an existing user would
+    never get the rules that make an OCR reading categorise at all.
+    """
+    db, store = books["db"], books["store"]
+    with db.connect() as connection:
+        connection.execute("DELETE FROM category_rule WHERE pattern IN ('MOP', 'CLX')")
+        connection.execute("PRAGMA user_version = 2")
+
+    db.init_db()
+
+    patterns = {rule["pattern"] for rule in store.list_rules()}
+    assert {"MOP", "CLX", "DEPOSIT"} <= patterns
+
+
+def test_the_migration_leaves_a_rule_the_user_already_wrote_alone(books):
+    """A pattern the user owns must not gain a duplicate built-in twin."""
+    db, store = books["db"], books["store"]
+    household = categories(store)["Household"]
+    with db.connect() as connection:
+        connection.execute("DELETE FROM category_rule WHERE pattern = 'MOP'")
+        connection.execute(
+            "INSERT INTO category_rule (field, match_type, pattern, category_id, "
+            "priority, enabled, is_builtin) "
+            "VALUES ('description', 'contains', 'MOP', ?, 10, 1, 0)",
+            (household,),
+        )
+        connection.execute("PRAGMA user_version = 2")
+
+    db.init_db()
+
+    mops = [rule for rule in store.list_rules() if rule["pattern"] == "MOP"]
+    assert len(mops) == 1
+    assert mops[0]["is_builtin"] == 0
+
+
 def test_an_empty_set_of_books_reports_nothing(books):
     store = books["store"]
     assert store.status_counts() == {}

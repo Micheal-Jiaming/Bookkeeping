@@ -14,3 +14,14 @@ dist/
 # The user's own books, receipt images, log and API key. Personal data, not source.
 data/
 sample-receipt.png
+
+# Receipt photographs dropped in the project folder while testing. A real
+# receipt is somebody's shopping, their payment method and often their address,
+# so none of them belong in a published repository. This is why the real receipt
+# is kept in the tests as OCR word boxes and a transcription
+# (tests/fixtures/walmart_ocr_words.json, tests/test_real_receipt.py) rather than
+# as the photograph itself -- the tests get the same regression cover, and
+# nothing personal is published.
+/*.jpg
+/*.jpeg
+/*.png

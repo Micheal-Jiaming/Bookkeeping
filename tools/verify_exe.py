@@ -43,16 +43,35 @@ EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 
 
 def _descendants(pid: int) -> set[int]:
-    """Every child process id below `pid`, recursively."""
+    """Every child process id below `pid`, recursively.
+
+    The whole process table is fetched in **one** PowerShell call and the tree
+    walked in Python. An earlier version shelled out once per node per poll,
+    which cost a second or more each time; under the disk load right after a
+    build the polling loop ran so seldom that it missed a dialog that was
+    sitting on screen the entire time, and reported a working build as broken.
+    A verification tool that cries wolf is worse than no verification tool.
+    """
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command",
-         f"Get-CimInstance Win32_Process | Where-Object ParentProcessId -eq {pid} "
-         "| Select-Object -ExpandProperty ProcessId"],
+         "Get-CimInstance Win32_Process | ForEach-Object "
+         "{ \"$($_.ProcessId) $($_.ParentProcessId)\" }"],
         capture_output=True, text=True)
-    kids = {int(line) for line in result.stdout.split() if line.strip().isdigit()}
-    for kid in list(kids):
-        kids |= _descendants(kid)
-    return kids
+
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+
+    found: set[int] = set()
+    queue = [pid]
+    while queue:
+        for kid in children.get(queue.pop(), []):
+            if kid not in found:
+                found.add(kid)
+                queue.append(kid)
+    return found
 
 
 def windows_of(pid: int) -> list[tuple[int, str, str]]:

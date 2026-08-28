@@ -489,6 +489,7 @@ def run(argv: list[str] | None = None) -> int:
     """Create the window and enter the Tk event loop."""
     _enable_dpi_awareness()
     init_db()
+    _log_engines()
     root = tk.Tk()
     # Tk's own font scaling is already derived from the display DPI once the
     # process is DPI-aware, so it is deliberately left alone here; only explicit
@@ -496,6 +497,24 @@ def run(argv: list[str] | None = None) -> int:
     MainWindow(root)
     root.mainloop()
     return 0
+
+
+def _log_engines() -> None:
+    """Record which engines this copy can actually use, and why not.
+
+    Worth a line in the log on every start: when a portable copy misbehaves on
+    somebody else's machine, the first question is always which engines it
+    found there, and this answers it without asking them to open Settings. It is
+    also how a frozen build is checked -- whether PyInstaller really bundled the
+    Windows OCR bindings cannot be told from the source tree.
+    """
+    try:
+        for engine in engine_status(settings_store.get_all()):
+            log.info("Engine %-9s %s — %s", engine["name"],
+                     "ready" if engine["available"] else "unavailable",
+                     engine["detail"])
+    except Exception:  # diagnostics must never stop the window from opening
+        log.exception("Could not determine engine availability")
 
 
 def _enable_dpi_awareness() -> None:

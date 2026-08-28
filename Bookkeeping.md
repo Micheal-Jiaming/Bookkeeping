@@ -18,10 +18,10 @@ reasoning behind it, the exact commands, what has been verified and what has
 not, and the history of fixes that must not be regressed.
 
 - **Location:** `D:\claude\Bookkeeping`
-- **Version:** 1.2.2 (see `VERSION`)
-- **Ships as:** `dist\Bookkeeping.exe` — one file, 28.3 MB, Windows x64, no installer
+- **Version:** 1.3.0 (see `VERSION`)
+- **Ships as:** `dist\Bookkeeping.exe` — one file, 29.2 MB, Windows x64, no installer
 - **Stack:** Python 3.13 · **Tkinter** · SQLite · PyInstaller
-- **Recognition:** Claude vision (`claude-opus-5`) primary, Tesseract OCR fallback
+- **Recognition:** Claude vision (`claude-opus-5`) primary; Windows' built-in OCR offline, needing no key or install; Tesseract optional
 - **Locale:** USD-primary, English interface (currency stored per receipt)
 
 ---
@@ -44,12 +44,16 @@ From the user, 2026-08-23, in the order they arrived:
    — not a web-based interface.** (Delivered in 1.2.0: the browser interface was
    removed and rebuilt as a Tkinter window. See §10 for what "like the Pomodoro
    timer" was taken to mean.)
+7. **A real Walmart receipt failed to be recognised; fix it.** (2026-08-29,
+   delivered in 1.3.0. The cause was not a parsing bug: neither engine was
+   installed, so recognition had never actually run on this machine. Fixed by
+   adding an engine that needs no installation — see §3 and §9.)
 
 Three design questions were answered by the user before any code was written:
 
 | Question | Answer |
 | --- | --- |
-| How should images be recognised? | **Both** engines, Claude vision primary, Tesseract as offline fallback |
+| How should images be recognised? | **Both** engines, Claude vision primary, OCR as offline fallback. Since 1.3.0 the offline half is Windows' own OCR, with Tesseract optional. |
 | What form should the app take? | A local app rather than a hosted service |
 | What locale? | **USD-primary, English interface** |
 
@@ -93,6 +97,48 @@ validation → categorisation → human review. The failure they all warn about 
 model returning well-formed JSON with wrong numbers, which only an arithmetic
 check catches.
 
+### A second round, for the offline engine (1.3.0)
+
+Adding the Windows OCR engine raised a different problem — turning word bounding
+boxes back into receipt rows — so a second search was run specifically for that.
+What it produced, and what was used:
+
+- **[docTR](https://github.com/mindee/doctr)** (`models/builder.py`,
+  `_resolve_lines`) is the reference implementation for grouping OCR words into
+  lines: sort by vertical centre, and start a new row when the gap to the running
+  mean exceeds **half the median word height**. A *fraction of the text size*
+  rather than a pixel count is what survives photos taken at different distances.
+  **This is the constant `app/extract/windows_ocr.ROW_TOLERANCE` uses.** Its
+  second phase splits a row at large horizontal gaps, which would be actively
+  wrong here — a right-aligned price *is* a large horizontal gap — so only phase
+  one was taken.
+- **[bbox-align](https://github.com/doctor-entropy/bbox-align)** (MIT) tests
+  whether one box's vertical centre falls inside another's bounds, and resolves
+  lines as connected components rather than greedily. Worth remembering if a
+  badly crumpled receipt ever defeats the current approach.
+- **[receipt-parser-legacy](https://github.com/ReceiptManager/receipt-parser-legacy)**
+  (854★, Apache-2.0) contributes the separator-tolerant amount pattern
+  `\d+(\.\s?|,\s?|[^a-zA-Z\d])\d{2}`, which accepts a decimal point that OCR
+  rendered as a space or a speck. The same idea is why `repair_amounts` rejoins
+  `"3." "04"` before parsing.
+- **[nzregs/receipt-api](https://github.com/nzregs/receipt-api)** (MIT, C#) is the
+  only project found using this same Microsoft OCR engine. It snaps words to a
+  line within "the height of the current line less 1/3 of the average" — a looser
+  tolerance than docTR's, and unnecessary here.
+- **[clovaai/cord](https://github.com/clovaai/cord)** is a dataset, not code:
+  11k receipts with per-word boxes *and* line-item role labels. It is the right
+  evaluation set if the heuristics are ever tuned seriously, rather than against
+  the one receipt in `tests/`.
+
+Two warnings from that research were worth acting on. First, **character-confusion
+repair (`O`→`0`, `S`→`5`) must be gated to the amount column**; applied across the
+page it destroys item names, which is why every pattern in `repair_amounts` is
+anchored to a price. Second, **every published preprocessing recommendation is
+about Tesseract or EasyOCR** — none of it is about `Windows.Media.Ocr`, which does
+its own normalisation. Measuring rather than trusting it was the right call: see
+§10, where greyscale, upscaling, autocontrast and sharpening all failed to help
+and two of them hurt.
+
 ### What this project took, and what it deliberately did not
 
 | Taken | Left out, and why |
@@ -128,7 +174,8 @@ check catches.
                     │ scan_now()                           │ │
                     │  1. engines = build_engines(settings)│ │
                     │  2. Claude vision ─▶ ExtractedReceipt│ │
-                    │     else Tesseract ─▶ ExtractedReceipt│ │
+                    │     else Windows OCR ─▶ "     "      │ │
+                    │     else Tesseract  ─▶ "     "       │ │
                     │  3. categorise each line             │ │
                     │  4. validate arithmetic → flags      │ │
                     │  5. write receipt + line_items       │ │
@@ -172,6 +219,53 @@ them by accident:
   messages endpoint, which would mean giving up `messages.parse`, and receipt
   reading is not a refusal-prone category. A `refusal` stop reason is still
   handled explicitly rather than mistaken for a malformed reply.
+
+### The offline engines, and why there are two
+
+Neither needs a key or a network. They share everything downstream of getting
+characters off the image: both hand plain text to
+`app/extract/receipt_text.parse_receipt_text`, which decides which lines are
+purchases, which are the summary block, and which are noise.
+
+- **Windows OCR** (`windows_ocr.py`) is the one that makes the application work
+  out of the box, and it is why a portable copy handed to somebody else reads
+  receipts on their machine with nothing configured. `Windows.Media.Ocr` ships
+  with Windows 10 and 11; the `winrt-*` packages in `requirements.txt` are
+  bindings only — no model is bundled and nothing is downloaded, because the
+  recogniser is already part of the operating system.
+- **Tesseract** (`tesseract_ocr.py`) stays as an explicit choice for anyone who
+  has installed it. It is a separate ~60 MB install this application cannot ship,
+  which is exactly why it cannot be the default.
+
+The interesting work in the Windows engine is not the OCR call, it is **putting
+the words back in order**. Windows groups text into its own lines, and on a
+receipt photographed at a slight angle that grouping splits the page into a
+column of descriptions followed by a column of amounts — so `result.text` reads
+as every item name, then every price, with nothing connecting them. Unusable.
+What it also returns is a bounding box per word, and re-grouping those by
+vertical position rebuilds the real rows:
+
+```
+  raw result.text            group_rows() + repair_amounts()
+  ---------------            -------------------------------
+  BEDINABAG                  BEDINABAG 840021403470 29.72 x
+  GV TWIST MOP               GV TWIST MOP 078742352910 10.88 x
+  COKE                       COKE 049000050110 F 3.04 x
+  ...                        ...
+  29.72 x                    SUBTOTAL 141.94
+  10.88 x                    TAXI 5.5000 % 7.50
+  3.  04 x                   TOTAL 149.44
+```
+
+which is the shape the shared parser already knows how to read. Both steps are
+pure functions, so `tests/test_windows_ocr.py` exercises the layout logic against
+stored word boxes without needing an OCR language pack installed.
+
+Because Windows OCR reports no per-word confidence, the confidence this engine
+declares is derived from the receipt's own bookkeeping instead: a reading that
+found a total, produced items, and whose amounts add up to the printed subtotal
+got the layout right; one that did not, did not. It is capped at 0.5 either way,
+so an offline reading never auto-confirms.
 
 ### Categorisation precedence
 
@@ -278,6 +372,11 @@ app/ui/                 the interface
 app/store.py            everything done to the books, as plain function calls
 app/pipeline.py         scan orchestration and engine fallback
 app/extract/            recognition engines behind one interface
+    base.py             the Extractor contract + the Pydantic schema/prompt
+    claude_vision.py    the vision model (primary)
+    windows_ocr.py      Windows' own OCR + word-box row reconstruction
+    tesseract_ocr.py    Tesseract, if the user installed it
+    receipt_text.py     shared: receipt text → ExtractedReceipt
 app/categorize.py       the precedence chain
 app/validate.py         arithmetic checks → review flags
 app/db.py               schema and seed data
@@ -313,9 +412,9 @@ One window, four pages, a menu bar (File / View / Help) and a status bar.
   explicit from/to dates, and CSV export.
 - **Categories & rules** — categories with usage counts, the rule list, add and
   delete, the precedence explanation, and the backfill button.
-- **Settings** — engine, API key (masked), model, effort, base URL, Tesseract
-  path, auto-confirm, live engine status, what a scan costs, and where the data
-  folder is.
+- **Settings** — engine, API key (masked), model, effort, base URL, offline OCR
+  language, Tesseract path, auto-confirm, live engine status, what a scan costs,
+  and where the data folder is.
 
 Keyboard: `Ctrl+O` add images, `Ctrl+V` paste an image from the clipboard,
 `Ctrl+N` add by hand, `Ctrl+1..4` pages, `F5` refresh, `Ctrl+Q` quit.
@@ -384,8 +483,10 @@ Bookkeeping.exe --version
 
 ### First-run setup
 
-The app starts with **no engine available** and says so in the header. To turn on
-recognition, open **Settings**:
+**Nothing has to be configured.** On any Windows 10 or 11 machine with a language
+pack installed the app can read a receipt the moment it opens, using the OCR built
+into Windows; the header names the engines it found. For a better reading, open
+**Settings**:
 
 - **Claude vision (recommended):** paste an Anthropic API key. Model defaults to
   `claude-opus-5`, effort to `medium`. Cost depends on how many lines the receipt
@@ -396,14 +497,26 @@ recognition, open **Settings**:
   records what it actually cost, shown in the review pane. The key is stored in
   `data\bookkeeping.db` on that machine only, and is never displayed back in
   full.
-- **Offline OCR:** install the Tesseract binary
+- **Windows OCR:** nothing to install. If the *Offline OCR language* dropdown is
+  empty, or the engine reports no language pack, add one under **Settings → Time
+  & language → Language & region** in Windows itself. Leave the dropdown on
+  *Automatic* and it prefers an English recogniser, which is what US receipts
+  need — the first language in a user's Windows profile is often not English,
+  and reading a US receipt with the German model goes badly.
+- **Tesseract (optional second offline reader):** install the binary
   (<https://github.com/UB-Mannheim/tesseract/wiki>) and, if it is not on `PATH`,
-  point Settings at `tesseract.exe`. Not bundled — it is a separate ~50 MB
-  program with its own installer.
+  point Settings at `tesseract.exe`. Not bundled — it is a separate ~60 MB
+  program with its own installer, which is precisely why it is not the default.
 
-`engine = auto` (the default) tries Claude first and falls back to Tesseract,
-noting the fallback in the review flags. `claude` and `tesseract` pin one engine;
-`manual` turns scanning off entirely.
+`engine = auto` (the default) tries Claude, then Windows OCR, then Tesseract,
+noting any fallback in the review flags. `claude`, `windows` and `tesseract` pin
+one engine; `manual` turns scanning off entirely.
+
+**What the offline engines cannot do is expand an abbreviation.** Claude turns
+`CLX PLNGR` into "Clorox toilet plunger" and categorises from that; OCR only sees
+`CLX PLNGR`. The keyword rules close some of the gap (§11.22) but not all of it,
+so an offline reading leaves more lines uncategorised. That is the honest
+trade-off for needing no key.
 
 ### From source (development)
 
@@ -480,7 +593,15 @@ py tools\make_sample_receipt.py out.png     # a synthetic receipt image
   then runs `--version` to prove the lock was released. Everything it checks has
   been broken at least once. It also carries the hard-won detail that a one-file
   PyInstaller build runs the app in a **child** process, so looking for the
-  window by the launched pid finds nothing (§11.19).
+  window by the launched pid finds nothing (§11.19), and it fetches the process
+  table in a single call rather than shelling out per node, because the slow
+  version produced a false failure (§11.24).
+
+  **After running it, read `data\bookkeeping.log` in the workspace it used**
+  (pass `--keep` to stop it being deleted). The app logs which engines it found
+  on startup, and that line is the only way to confirm a frozen build can really
+  reach Windows OCR — an import that works from source proves nothing about what
+  PyInstaller bundled.
 - **`screenshot_pages.py`** — a native window cannot be inspected the way a web
   page can. `tests/test_ui.py` proves the interface *holds together*; only a
   picture shows that it *looks* right, and three real faults were visible in no
@@ -512,26 +633,26 @@ when done, and check with
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.2.2` |
-| `requirements.txt` | 19 | pinned to the versions actually installed and tested |
+| `VERSION` | 1 | `1.3.0` |
+| `requirements.txt` | 31 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
 | `build.bat` | 47 | build `dist\Bookkeeping.exe`, keeping the previous one |
-| `Bookkeeping.spec` | 86 | PyInstaller build definition, with the reasoning inline |
+| `Bookkeeping.spec` | 93 | PyInstaller build definition, with the reasoning inline |
 | `make_icon.py` | 128 | draws `assets/icon.ico` (a receipt with a torn edge) |
 | `assets/icon.ico` | — | 8 sizes, 16–256 px; generated but tracked, because the build needs it |
 | `.gitignore` / `.gitattributes` | 16 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches ignored; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
-| `app/ui/window.py` | 513 | the window: chrome, menus, navigation, poll loop, dialogs |
+| `app/ui/window.py` | 532 | the window: chrome, menus, navigation, poll loop, dialogs |
 | `app/ui/receipts.py` | 645 | receipt list and the review pane |
 | `app/ui/reports.py` | 355 | tiles, hand-drawn canvas charts, merchant table |
 | `app/ui/theme.py` | 292 | palette, display scaling, ttk styling, shared widgets |
-| `app/ui/settings_page.py` | 262 | recognition settings |
+| `app/ui/settings_page.py` | 288 | recognition settings |
 | `app/ui/rules.py` | 240 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
 | `app/pipeline.py` | 301 | scan orchestration, thread pool, engine fallback |
-| `app/db.py` | 348 | schema, seed categories and rules, connection handling |
+| `app/db.py` | 456 | schema, seed categories and rules, migrations, connections |
 | `app/launcher.py` | 157 | data folder, logging, single-instance lock, error reporting |
 | `app/categorize.py` | 131 | the precedence chain and rule matching |
 | `app/validate.py` | 126 | arithmetic and sanity checks → review flags |
@@ -539,24 +660,28 @@ when done, and check with
 | `app/money.py` | 66 | integer-cent money conversion |
 | `app/images.py` | 66 | image normalisation (EXIF, downscale, PNG) |
 | `app/settings_store.py` | 60 | settings read/write, secret masking |
-| `app/extract/tesseract_ocr.py` | 351 | Tesseract engine + heuristic receipt-text parser |
+| `app/extract/receipt_text.py` | 265 | shared: receipt text → `ExtractedReceipt` |
+| `app/extract/windows_ocr.py` | 257 | Windows OCR engine + word-box row reconstruction |
 | `app/extract/claude_vision.py` | 207 | Claude vision engine, pricing table, error mapping |
 | `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
-| `app/extract/__init__.py` | 80 | engine registry and fallback order |
+| `app/extract/tesseract_ocr.py` | 107 | Tesseract engine (parser now shared) |
+| `app/extract/__init__.py` | 89 | engine registry and fallback order |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
-| `tools/verify_exe.py` | 199 | drives the built .exe and checks it behaves (§7) |
+| `tools/verify_exe.py` | 218 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
 | `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
 | `tools/screenshot_pages.py` | 114 | opens the window and screenshots every page |
-| `tests/test_store.py` | 607 | the service layer, end to end with a stub engine |
-| `tests/test_ui.py` | 462 | builds the real window and drives it |
-| `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
-| `tests/test_units.py` | 271 | money, validation, precedence, OCR-text parsing |
-| `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
+| `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
+| `tests/test_ui.py` | 471 | builds the real window and drives it |
+| `tests/test_units.py` | 295 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
+| `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
+| `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
+| `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
+| `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-8 179 lines of Python. Not in version control: `data/` (the user's books),
+8 960 lines of Python. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -564,9 +689,9 @@ when done, and check with
 ## 9. What has and has not been verified
 
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
-2026-08-23:
+2026-08-23 and again 2026-08-29 for 1.3.0:
 
-**Automated — 134 tests pass** (`pytest tests/ -q`, ~41 s):
+**Automated — 161 tests pass** (`pytest tests/ -q`, ~54 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -588,17 +713,29 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   bundled-resource paths under a simulated `sys._MEIPASS`, the single-instance
   lock (same folder refused, two folders both allowed, released on exit), and
   logging to the data folder.
+- **Windows OCR layout handling** (`tests/test_windows_ocr.py`, 22 tests): rows
+  are rebuilt top-to-bottom and left-to-right from the stored word boxes; the
+  grouping is proved scale-invariant (the same words at 4× the size group
+  identically) and tolerant of a row that drifts downwards across the page; each
+  of the three amount repairs is checked, and checked *not* to fire inside an item
+  description; and the reading of the real receipt is asserted end to end.
 
 **By hand, against the built `Bookkeeping.exe` copied to an empty folder** (no
-Python, no venv, no source):
+Python, no venv, no source) — re-run for 1.3.0 with `tools\verify_exe.py`:
 
-- It opens a window titled `Bookkeeping 1.2.0`, class `TkTopLevel`, with the
+- It opens a window titled `Bookkeeping 1.3.0`, class `TkTopLevel`, with the
   receipt icon in the title bar and the File/View/Help menus.
-- It creates `data\bookkeeping.db` (53 KB, seeded) and `data\bookkeeping.log`
+- It creates `data\bookkeeping.db` (60 KB, seeded) and `data\bookkeeping.log`
   beside itself.
+- **The frozen build really reaches Windows OCR.** Its own log records
+  `Engine windows ready — Windows OCR (en-GB)`, which is the only way to know
+  PyInstaller bundled the `winrt` bindings correctly — an import that works from
+  source proves nothing about the .exe. This is what `_log_engines()` in
+  `app/ui/window.py` exists for.
 - A **second launch is refused** with an "Already running" dialog and exits 0.
 - **Closing the window exits cleanly** (code 0), and `--version` afterwards
-  prints `1.2.0` — proving the lock was released.
+  prints `1.3.0` — proving the lock was released.
+- Startup measured at **3.4–3.6 s** to a visible window, over three runs.
 - The four pages and both themes were screenshotted from the running program and
   inspected: list, review pane with the image and a real arithmetic flag, charts
   with correct proportions and value labels, 15 categories and 59 rules, and the
@@ -638,6 +775,49 @@ What that run established, pushing the real reading through the real pipeline:
   $28.12, Groceries $27.19, Personal Care $10.42, Tax & unitemised $7.50, Fees &
   Taxes $0.15 — summing exactly to the $149.44 spent.
 
+**The same receipt, read offline by Windows OCR** (2026-08-29). This time the
+photograph itself went through the whole application — normalised by
+`app/images.py` to 1176×1568 PNG, stored, and scanned by `pipeline.scan_now`.
+Measured against the fixture above:
+
+| | Read | Truth |
+| --- | --- | --- |
+| Subtotal / Tax / Total | **141.94 / 7.50 / 149.44** | exact |
+| Payment method | `CASH` | correct |
+| Merchant, date | `None`, `None` | correct — they are not in frame |
+| Line items | **20** of 24 | 4 lost |
+| Item amounts | 22 of 24 recoverable, 20 kept | — |
+| Categorised | 12 of 20 | — |
+
+The four losses are genuine OCR failures, and worth naming so nobody hunts for a
+parser bug that is not there: two lines (`DOVE BW 11OZ`, the second `GV 1G SP`)
+had their descriptions dropped entirely; `GV AMMONIA` lost the leading `2.` of
+its amount; and `DWN EZS 22Z` was misread as 3.33 instead of 3.83. Together they
+leave the items summing to 131.61 against a printed subtotal of 141.94.
+
+**That gap is reported, not hidden** — "Line items sum to 131.61 but the subtotal
+reads 141.94 (off by 10.33)" — which is the designed behaviour. A missing leading
+digit *could* be guessed at from the residual, and deliberately is not: a
+plausible wrong number in a set of books is worse than an obvious hole, and the
+review pane exists to fill holes.
+
+**The 1568 px cap was measured, and it helps.** An earlier version of this
+document listed the cap as an untested risk — "whether the item names survive it
+is unmeasured". They do, and more than that: feeding Windows OCR the original
+1280×1706 photograph instead of the 1176×1568 normalised copy makes the reading
+*worse*. It loses the `TOTAL 149.44` row altogether and mis-parses enough numbers
+that the items sum to 253.95 instead of 131.61. Re-encoding is not the cause —
+the original downscaled to a 1568 long edge reads identically to the app's own
+copy — so it is the resolution itself. `app/images.py` normalises for the
+Anthropic API's benefit; it turns out to earn its place twice.
+
+Categorisation is the weaker half offline, for a structural reason: the vision
+model expands `CLX PLNGR` to "Clorox toilet plunger" and categorises from that,
+while OCR sees only `CLX PLNGR`. Adding abbreviation and brand rules (§11.22)
+took this from 3 of 20 to 12 of 20, and correctly set the receipt's own category
+to Household. The 8 that remain (`BEDINABAG`, `EQJELLUBE8OZ`, `HS SH CLS8.5` …)
+are not guessable from the printed text alone.
+
 **Not verified, and honestly so:**
 
 - **That reading was made by Claude, but not by the app.** No API key exists in
@@ -647,14 +827,15 @@ What that run established, pushing the real reading through the real pipeline:
   call. What remains untested is the join: a live key, a real HTTP round trip,
   and what the model makes of *its own* view of the pixels rather than a reading
   handed to it.
-- **The photograph's pixels have never gone through the app.** The uploaded image
-  was not saved anywhere on disk that could be reached, so normalisation ran on a
-  stand-in file. The open question that matters: the long edge is capped at
-  1568 px, and on a receipt photographed at full phone resolution that is a real
-  reduction — whether the item names survive it is unmeasured.
 - **Tesseract has never run here** — the binary is not installed. Its
-  text-parsing half (`parse_receipt_text`) is unit-tested against realistic OCR
-  text, but the OCR half and the confidence calculation are untested in practice.
+  text-parsing half is now the shared `receipt_text.py`, which is unit-tested and
+  exercised hard by the Windows engine, but Tesseract's own OCR call and its
+  confidence calculation are untested in practice.
+- **Windows OCR has been measured on exactly one receipt, in one language.**
+  20 of 24 lines is this photograph's number, not a general accuracy figure. A
+  differently-lit, more crumpled or non-English receipt is unmeasured, and the
+  row-grouping tolerance has never been tuned against a corpus — `clovaai/cord`
+  (§2) is the dataset for that if it is ever worth doing.
 - **The .exe has only ever run on this machine**, at one DPI setting (150 %). It
   is a Windows x64 build; macOS, Linux and ARM Windows would need rebuilding
   there. Nothing about another user's machine — Defender policy, a 100 % or 200 %
@@ -670,26 +851,31 @@ What that run established, pushing the real reading through the real pipeline:
 
 ### Where to pick up
 
-The state as of 1.2.2, for whoever reads this next:
+The state as of 1.3.0, for whoever reads this next:
 
-- **Everything is committed and tagged** (`v1.2.2`), pushed to the `mirror`
-  remote, working tree clean. `dist\Bookkeeping.exe` is built from this commit
-  and has passed `tools\verify_exe.py`.
+- **The application works with nothing configured.** That is new in 1.3.0 and is
+  the single most important fact here: before it, a fresh copy could not read a
+  receipt at all without an API key or a Tesseract install, and the first real
+  receipt it was ever given failed with four red flags and no data.
 - **The two open verifications**, in order of value:
   1. **A live API call.** Put a real key in Settings, add the receipt photo, and
      compare against the fixture in `tests/test_real_receipt.py` (merchant
      `null`, date `null`, subtotal 141.94, tax 7.50, total 149.44, 24 lines). If
      it matches, the last real gap closes. If it does not, the difference is the
      most interesting data this project can produce.
-  2. **A real photograph through `app/images.py`.** No phone photo has ever been
-     normalised by the app. The long edge is capped at 1568 px, which on a
-     full-resolution photo is a large reduction; whether the item names survive
-     it is unknown. Measure before changing the cap.
+  2. **A second real receipt through the offline engine.** Everything known about
+     Windows OCR accuracy comes from one photograph. A restaurant bill, a fuel
+     receipt or a faded one would each say something the current fixture cannot.
 - **The next feature worth building** is in §13: more real receipts. One found a
-  mis-categorisation bug within minutes; a restaurant bill, a fuel receipt and
-  something faded would likely each find their own.
+  mis-categorisation bug within minutes; another would likely find its own.
 - **Do not** re-add a store-brand keyword rule (§11.18), reintroduce a web
-  interface (§10), or "simplify" the spec's excludes (§11.11).
+  interface (§10), "simplify" the spec's excludes (§11.11), preprocess the image
+  before Windows OCR (§10 — it was measured, and it makes the reading worse), or
+  let the amount repairs in `windows_ocr.py` fire outside the amount column
+  (§11.21).
+- **Editing this file:** it contains U+202F narrow no-break spaces inside figures
+  such as "150 %", which silently defeat exact-string edits. Match on lines that
+  do not contain them, or patch by line number.
 
 ---
 
@@ -733,8 +919,29 @@ The state as of 1.2.2, for whoever reads this next:
   a local single-user app; stated here so it is not a surprise, and it matters
   more now the program is portable — *the database on a USB stick carries the key
   with it*.
-- **Tesseract is not bundled.** A separate ~50 MB program with its own installer;
-  bundling it would triple the download for a fallback most users never enable.
+- **The offline engine is the one built into Windows.** `Windows.Media.Ocr` ships
+  with Windows 10 and 11, so it costs nothing to depend on and needs no setup by
+  the person receiving a portable copy — which is the whole point of a portable
+  copy. It is ahead of Tesseract in the `auto` order because it is the engine
+  whose accuracy has actually been measured here (§9), and because an engine that
+  is always present beats one that usually is not.
+- **Tesseract is not bundled, and is no longer the offline default.** A separate
+  ~60 MB program with its own installer; bundling it would triple the download for
+  a fallback most users never enable. It stays selectable for anyone who has it.
+- **The image is not preprocessed before Windows OCR.** Greyscale, 1.5×/2×/3×
+  upscaling, autocontrast and sharpening were each measured against the real
+  receipt: none beat the plain image, and sharpening and upscaling were *worse*
+  (17 amounts recovered instead of 22). The published advice to deskew, upscale
+  and binarise is all Tesseract advice — the Windows engine does its own
+  normalisation and resents the help. Do not add a preprocessing step without
+  re-running that comparison. The one transformation that *does* help is the
+  downscale `app/images.py` already applies: the full-resolution phone photo
+  reads measurably worse than the 1568 px copy (§9).
+- **A missing digit is left missing.** When OCR loses the leading `2.` of `2.94`,
+  the residual against the subtotal would often identify it. The reading does not
+  guess: a plausible wrong number in a set of books is worse than an obvious hole,
+  because the hole gets reviewed and the wrong number does not. The same reasoning
+  is why `to_cents` returns `None` rather than `0` for an absent value.
 - **One window per set of books, not per machine.** The lock is a file lock in the
   data folder, so two portable copies with their own books run side by side.
 
@@ -816,6 +1023,45 @@ The state as of 1.2.2, for whoever reads this next:
     nothing but the bootloader's hidden window — which looks exactly like a crash
     on startup and is not. Any future verification script must walk the process
     tree.
+20. **The tax flag after an amount is matched case-insensitively.** Walmart
+    prints a small-capital `X`; Windows OCR reads it as a lowercase `x` on most
+    lines. While the trailing-amount pattern ended in `[A-Z]?`, the amount failed
+    to match at end-of-line and *the entire item was silently discarded* — 15 of
+    the 20 readable lines on the real receipt vanished this way, with no error
+    anywhere. A pattern that drops data on a near-miss is the worst kind: it
+    looks like the OCR failed (`app/extract/receipt_text.py`,
+    `tests/test_units.py`).
+21. **OCR character repairs are gated to the amount column.** `O`→`0` is needed
+    (Windows reads a leading zero as the letter o) but must never run over a whole
+    line: `O` is a letter in half the products on a receipt, and a global
+    substitution turns `GV TOASTED O` into `GV TOASTED 0` and `DOVE` into `D0VE`.
+    Every pattern in `windows_ocr.repair_amounts` is anchored to a `.dd` price for
+    that reason, and a test asserts a description is left untouched. The three
+    repairs are also **order-dependent** — the letter-zero fix must run before the
+    split-decimal rejoin, or neither matches `"o. 98"` (`app/extract/windows_ocr.py`,
+    `tests/test_windows_ocr.py`).
+22. **Abbreviated item names need their own rules, and they are brands, not store
+    brands.** Offline OCR cannot expand `CLX PLNGR` into "Clorox toilet plunger",
+    so the original plain-English keyword list matched only 3 of 20 items on the
+    real receipt. Schema version 3 seeds generic product nouns (`MOP`, `AMMONIA`,
+    `SPGE`) and single-category brands (`LYSOL`, `PAMPERS`), taking it to 12 of 20.
+    Note the difference from 11.18: `CLOROX` sells cleaning products and nothing
+    else, while `GREAT VALUE` sells everything — that is what makes one safe to
+    seed and the other not. Patterns that hide inside ordinary words are excluded
+    on purpose: `GAIN` is a detergent but also the end of `BARGAIN`, and `AIM` is
+    a toothpaste but also the middle of `CLAIM` (`app/db.py`, `tests/test_store.py`).
+23. **A cropped photo must report no merchant rather than invent one.** With the
+    top of the receipt out of frame the merchant fallback took the first line
+    containing letters and returned "Items Sold 21". Summary lines are now skipped
+    before that fallback runs; saying nothing is the correct answer
+    (`app/extract/receipt_text.py`).
+24. **A verification tool that cries wolf is worse than none.** `verify_exe.py`
+    shelled out to PowerShell once per process-tree node *per poll*; under the
+    disk load right after a build the loop ran so rarely that it missed an
+    "Already running" dialog that was on screen the whole time, and reported a
+    working build as broken. It now fetches the process table once and walks the
+    tree in Python — the whole check went from a spurious failure to 15 seconds
+    (`tools/verify_exe.py`).
 
 ---
 
@@ -832,7 +1078,7 @@ sibling projects under `D:\claude`:
   its `HEAD` points at `main` so a clone checks out).
 - Baseline **1.0.0**. A functional change adds **0.1**, a fix or docs change adds
   **0.0.1**, updated in `VERSION` in the same commit and tagged `v<number>`.
-  Tags: `v1.0.0`, `v1.0.1`, `v1.1.0`, `v1.2.0`.
+  Tags: `v1.0.0`, `v1.0.1`, `v1.1.0`, `v1.2.0`, `v1.2.1`, `v1.2.2`, `v1.3.0`.
 - Tracked: all source, `Bookkeeping.spec`, `build.bat`, `run.bat`, `make_icon.py`
   and `assets/icon.ico` (generated, but the build needs it).
 - Ignored: `data/` (personal), `dist/` and `build/` (regenerable). **Because the
@@ -857,17 +1103,28 @@ Ranked by how much they would improve the daily experience:
    accuracy across them. One receipt is an anecdote.
 2. **Learning from corrections.** When a reviewer re-categorises the same item
    name twice, offer to create the keyword rule. The rules table already supports
-   it; only the suggestion is missing.
-3. **Drag and drop onto the window.** Tk cannot do it without `tkdnd`, a
+   it; only the suggestion is missing. This matters more since 1.3.0: an offline
+   reading leaves ~40 % of lines uncategorised, and those corrections are exactly
+   the signal that would fix it permanently.
+3. **Cross-check the item count against "# ITEMS SOLD".** Walmart prints the
+   number of items on the receipt, which is an independent constraint on whether
+   the reading dropped a line — free, and stronger than the subtotal check alone,
+   because it catches a dropped line whose amount was also missed. The offline
+   engine currently loses lines silently apart from the money not adding up.
+4. **Use the arithmetic residual to re-read ambiguous rows.** When the items are
+   short by exactly 0.9 × a parsed amount, a leading digit was lost and which row
+   it was is usually determinable. Would need care: see §10 on not guessing, so
+   this should propose a correction in the review pane rather than apply one.
+5. **Drag and drop onto the window.** Tk cannot do it without `tkdnd`, a
    non-stdlib dependency; the file dialog and clipboard paste cover the same need
    for now.
-4. **Budgets and month-over-month deltas** on the reports page.
-5. **A date picker** in the review pane instead of a typed `YYYY-MM-DD` box.
-6. **PDF and emailed receipts** (the Anthropic API takes PDFs as document blocks,
+6. **Budgets and month-over-month deltas** on the reports page.
+7. **A date picker** in the review pane instead of a typed `YYYY-MM-DD` box.
+8. **PDF and emailed receipts** (the Anthropic API takes PDFs as document blocks,
    so the engine change is small).
-7. **Multi-page or multi-receipt images** — currently one image is one receipt.
-8. **Code signing**, to stop the SmartScreen warning. Needs a paid certificate.
-9. **Batch scanning via the Message Batches API** at half price, for someone
+9. **Multi-page or multi-receipt images** — currently one image is one receipt.
+10. **Code signing**, to stop the SmartScreen warning. Needs a paid certificate.
+11. **Batch scanning via the Message Batches API** at half price, for someone
    scanning a shoebox of receipts at once.
 
 ---
@@ -879,6 +1136,7 @@ Ranked by how much they would improve the daily experience:
 | 1.0.0 | 2026-08-23 | First version. Research of Receipt Wrangler / Budget Lens / Firefly III; Claude-vision + Tesseract engines behind one interface; rules-then-model categorisation; arithmetic validation and review workflow; FastAPI + SQLite backend; browser interface with reports and CSV export; 69 tests. |
 | 1.0.1 | 2026-08-23 | Inline data-URI favicon, so a browser's automatic `/favicon.ico` request stopped logging a 404 that looked like a fault. |
 | 1.1.0 | 2026-08-23 | **Portable Windows executable.** One-file PyInstaller build (`Bookkeeping.spec`, `build.bat`, generated icon); launcher with a writable-data-folder search, port selection and single-instance hand-off; Quit button and browser heartbeat so the process could not linger invisibly. Also fixed merchant rules outranking the model's per-item category (§11.8). 97 tests. |
-| 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
-| 1.2.1 | 2026-08-23 | First real receipt read end to end (§9). Removed the seeded `GREAT VALUE` rule — a brand, not a category — with a migration for books that already exist, and kept the receipt as a permanent 12-test fixture. Settings now shows measured costs instead of estimates. 134 tests. |
 | 1.2.0 | 2026-08-23 | **A real desktop interface.** The browser UI (FastAPI, uvicorn, HTML/CSS/JS) was removed and replaced with a Tkinter window: menu bar, four pages, review pane with the receipt image beside the extracted fields, hand-drawn canvas charts, dark/light themes, remembered window geometry, clipboard paste, keyboard shortcuts. The HTTP layer's logic was extracted intact into `app/store.py`, so the same behaviour is now reachable as function calls; the API tests became store tests and 28 new tests drive the real window. Single-instance handling changed from "hand off to the running copy" to a lock on the data folder. Fixes §11.11–§11.17. 121 tests. |
+| 1.2.1 | 2026-08-23 | First real receipt read end to end (§9). Removed the seeded `GREAT VALUE` rule — a brand, not a category — with a migration for books that already exist, and kept the receipt as a permanent 12-test fixture. Settings now shows measured costs instead of estimates. 134 tests. |
+| 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
+| 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |

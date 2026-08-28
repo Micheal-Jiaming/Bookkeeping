@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.categorize import Rule, match_rules, resolve_category  # noqa: E402
-from app.extract.tesseract_ocr import parse_receipt_text  # noqa: E402
+from app.extract.receipt_text import parse_receipt_text  # noqa: E402
 from app.money import find_amounts, from_cents, to_cents  # noqa: E402
 from app.validate import check  # noqa: E402
 
@@ -269,3 +269,27 @@ def test_two_digit_years_resolve_to_this_century():
 
 def test_iso_dates_are_read_as_printed():
     assert parse_receipt_text("SHOP\n2026-03-04\nTOTAL 1.00\n").purchased_at == "2026-03-04"
+
+
+def test_a_lowercase_tax_flag_still_reads_as_an_item():
+    """OCR reads Walmart's small-capital X as a lowercase x most of the time.
+
+    While the trailing-flag pattern accepted uppercase only, the amount failed
+    to match at the end of the line and the entire item was silently discarded
+    -- 15 of the 20 readable lines on the first real receipt were lost this way.
+    """
+    receipt = parse_receipt_text("SHOP\nBEDINABAG 840021403470 29.72 x\nTOTAL 29.72\n")
+    assert [(i.description, i.amount) for i in receipt.items] == [("BEDINABAG", "29.72")]
+    assert receipt.items[0].taxable is True
+
+
+def test_the_class_flag_after_the_upc_is_not_part_of_the_item_name():
+    """Walmart prints a second flag between the UPC and the price."""
+    receipt = parse_receipt_text("SHOP\nFRENCH BREAD 200989000000 F 1.47 N\nTOTAL 1.47\n")
+    assert receipt.items[0].description == "FRENCH BREAD"
+
+
+def test_a_name_that_really_ends_in_one_letter_is_left_alone():
+    """The dangling-flag rule must not eat the D off a vitamin."""
+    receipt = parse_receipt_text("SHOP\nVITAMIN D 012345678901 8.99 X\nTOTAL 8.99\n")
+    assert receipt.items[0].description == "VITAMIN D"

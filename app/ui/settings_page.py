@@ -20,9 +20,12 @@ from .theme import Button, Card, entry, field_label
 ENGINES = (
     ("Auto — Claude vision, then offline OCR", "auto"),
     ("Claude vision only", "claude"),
+    ("Offline OCR only (built into Windows)", "windows"),
     ("Offline OCR only (Tesseract)", "tesseract"),
     ("Manual entry only (no scanning)", "manual"),
 )
+# "" means let the engine choose, which prefers an English recogniser.
+AUTO_LANGUAGE = "Automatic (prefer English)"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 MODELS = ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5")
 
@@ -75,6 +78,11 @@ class SettingsPage:
         self.base_url = tk.StringVar()
         holder = self._row(body, "Base URL (optional, for a proxy)")
         entry(holder, theme, width=40, textvariable=self.base_url).pack(anchor="w")
+
+        self.ocr_language = tk.StringVar()
+        holder = self._row(body, "Offline OCR language")
+        ttk.Combobox(holder, textvariable=self.ocr_language, state="readonly",
+                     width=38, values=[AUTO_LANGUAGE, *_ocr_languages()]).pack(anchor="w")
 
         self.tesseract = tk.StringVar()
         holder = self._row(body, "Tesseract executable (optional)")
@@ -159,6 +167,7 @@ class SettingsPage:
         self.model.set(values.get("model", "claude-opus-5"))
         self.effort.set(values.get("effort", "medium"))
         self.base_url.set(values.get("anthropic_base_url", ""))
+        self.ocr_language.set(values.get("ocr_language", "") or AUTO_LANGUAGE)
         self.tesseract.set(values.get("tesseract_cmd", ""))
         self.auto_confirm.set(values.get("auto_confirm_clean", "0") == "1")
         self.api_key.set("")
@@ -210,6 +219,8 @@ class SettingsPage:
             "model": self.model.get().strip() or "claude-opus-5",
             "effort": self.effort.get() if self.effort.get() in EFFORTS else "medium",
             "anthropic_base_url": self.base_url.get().strip(),
+            "ocr_language": "" if self.ocr_language.get() == AUTO_LANGUAGE
+                            else self.ocr_language.get().strip(),
             "tesseract_cmd": self.tesseract.get().strip(),
             "auto_confirm_clean": "1" if self.auto_confirm.get() else "0",
         }
@@ -240,6 +251,21 @@ def _label_for(choices: tuple[tuple[str, str], ...], value: str) -> str:
         if key == value:
             return label
     return choices[0][0]
+
+
+def _ocr_languages() -> list[str]:
+    """Language tags Windows can recognise, e.g. ['en-GB', 'zh-Hans-CN'].
+
+    Which packs are installed is a property of the machine, not of this program,
+    so the list is read at build time rather than hard-coded. Any failure here is
+    not worth an error dialog: the dropdown simply offers Automatic only.
+    """
+    try:
+        from winrt.windows.media.ocr import OcrEngine  # noqa: PLC0415
+
+        return [lang.language_tag for lang in OcrEngine.available_recognizer_languages]
+    except Exception:
+        return []
 
 
 def _cost_text() -> str:

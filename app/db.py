@@ -23,7 +23,7 @@ from .paths import default_data_dir
 
 log = logging.getLogger("bookkeeping.db")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -77,10 +77,10 @@ CREATE TABLE IF NOT EXISTS receipt (
     payment_method TEXT,
     category_id    INTEGER REFERENCES category(id) ON DELETE SET NULL,
     notes          TEXT,
-    engine         TEXT,             -- claude | tesseract | manual
+    engine         TEXT,             -- claude | windows | tesseract | manual
     model          TEXT,
     confidence     REAL,
-    raw_text       TEXT,             -- OCR text (tesseract path)
+    raw_text       TEXT,             -- OCR text (either offline engine)
     raw_response   TEXT,             -- extractor JSON, kept for auditing
     review_flags   TEXT,             -- JSON array of validation messages
     extract_ms     INTEGER,
@@ -139,6 +139,81 @@ BUILTIN_CATEGORIES: list[tuple[str, str, int]] = [
 # things a keyword can decide with certainty; anything ambiguous is left to the
 # model. Walmart receipts print abbreviated, upper-case item names, so patterns
 # are matched case-insensitively as substrings.
+# Added in schema version 3, when the offline OCR engine started reading real
+# receipts and it turned out the original keyword list only understood plain
+# English. Claude vision expands "CLX PLNGR" to "Clorox toilet plunger" and
+# categorises from that; OCR cannot, so on the first real Walmart receipt only
+# 3 of 20 items matched any rule at all.
+#
+# Two kinds of pattern are safe to seed here and a third is not:
+#   * generic product nouns ("MOP", "AMMONIA"), which name a category directly;
+#   * product brands that sell one kind of thing ("LYSOL", "PAMPERS");
+#   * NOT store brands -- see the note above about "GREAT VALUE".
+#
+# Patterns are matched as substrings, so anything that hides inside a longer
+# ordinary word is left out however useful it looks: "GAIN" is a laundry brand
+# but also the end of "BARGAIN", and "AIM" is a toothpaste but also the middle
+# of "CLAIM".
+RULES_ADDED_IN_V3: list[tuple[str, str, str, int]] = [
+    ("MOP", "Household", "description", 60),
+    ("BROOM", "Household", "description", 60),
+    ("SPONGE", "Household", "description", 60),
+    ("SPGE", "Household", "description", 60),
+    ("BUCKET", "Household", "description", 60),
+    ("HANGER", "Household", "description", 60),
+    ("AMMONIA", "Household", "description", 60),
+    ("BLEACH", "Household", "description", 60),
+    ("PLUNGER", "Household", "description", 60),
+    ("PLNGR", "Household", "description", 60),
+    ("LAUNDRY", "Household", "description", 60),
+    ("FABRIC SOFTENER", "Household", "description", 60),
+    ("LIGHT BULB", "Household", "description", 60),
+    ("CLX", "Household", "description", 60),
+    ("LYSOL", "Household", "description", 60),
+    ("WINDEX", "Household", "description", 60),
+    ("SWIFFER", "Household", "description", 60),
+    ("FEBREZE", "Household", "description", 60),
+    ("CHARMIN", "Household", "description", 60),
+    ("BOUNTY", "Household", "description", 60),
+    ("KLEENEX", "Household", "description", 60),
+    ("BODY WASH", "Personal Care", "description", 60),
+    ("TOOTHBRUSH", "Personal Care", "description", 60),
+    ("CONDITIONER", "Personal Care", "description", 60),
+    ("LOTION", "Personal Care", "description", 60),
+    ("DOVE", "Personal Care", "description", 60),
+    ("COLGATE", "Personal Care", "description", 60),
+    ("CREST", "Personal Care", "description", 60),
+    ("GILLETTE", "Personal Care", "description", 60),
+    ("PANTENE", "Personal Care", "description", 60),
+    ("OLD SPICE", "Personal Care", "description", 60),
+    ("COKE", "Groceries", "description", 60),
+    ("COCA-COLA", "Groceries", "description", 60),
+    ("PEPSI", "Groceries", "description", 60),
+    ("SPRITE", "Groceries", "description", 60),
+    ("JUICE", "Groceries", "description", 60),
+    ("CHEESE", "Groceries", "description", 60),
+    ("BUTTER", "Groceries", "description", 60),
+    ("PASTA", "Groceries", "description", 60),
+    ("SUGAR", "Groceries", "description", 60),
+    ("FLOUR", "Groceries", "description", 60),
+    ("COOKIE", "Groceries", "description", 60),
+    ("TUNA", "Groceries", "description", 60),
+    ("POTATO", "Groceries", "description", 60),
+    ("TOMATO", "Groceries", "description", 60),
+    ("LETTUCE", "Groceries", "description", 60),
+    ("PROTEIN", "Health & Pharmacy", "description", 60),
+    ("ADVIL", "Health & Pharmacy", "description", 60),
+    ("ALLERGY", "Health & Pharmacy", "description", 60),
+    ("BANDAGE", "Health & Pharmacy", "description", 60),
+    ("PAMPERS", "Baby & Kids", "description", 60),
+    ("HUGGIES", "Baby & Kids", "description", 60),
+    ("PURINA", "Pets", "description", 60),
+    ("PEDIGREE", "Pets", "description", 60),
+    # Bottle deposits are printed as "ME DEPOSIT", "CRV" and a dozen other
+    # state-specific spellings, so match the word itself rather than each one.
+    ("DEPOSIT", "Fees & Taxes", "description", 40),
+]
+
 BUILTIN_RULES: list[tuple[str, str, str, int]] = [
     # (pattern, category, field, priority)
     #
@@ -186,6 +261,7 @@ BUILTIN_RULES: list[tuple[str, str, str, int]] = [
     ("EARBUD", "Electronics", "description", 60),
     ("BAG FEE", "Fees & Taxes", "description", 40),
     ("BOTTLE DEPOSIT", "Fees & Taxes", "description", 40),
+    *RULES_ADDED_IN_V3,
     # Merchant-level defaults, used for the receipt header and as the fallback
     # for items nothing else matched.
     ("WALMART", "Groceries", "merchant", 200),
@@ -210,12 +286,13 @@ BUILTIN_RULES: list[tuple[str, str, str, int]] = [
 ]
 
 DEFAULT_SETTINGS = {
-    "engine": "auto",                 # auto | claude | tesseract | manual
+    "engine": "auto",                 # auto | claude | windows | tesseract | manual
     "anthropic_api_key": "",
     "anthropic_base_url": "",
     "model": "claude-opus-5",
     "effort": "medium",               # low | medium | high | xhigh | max
     "currency": "USD",
+    "ocr_language": "",               # Windows OCR language tag; "" picks English
     "tesseract_cmd": "",              # explicit path to tesseract.exe if not on PATH
     "auto_confirm_clean": "0",        # 1 = skip review when validation is clean
     # Interface state. Kept here rather than in a separate config file so a
@@ -295,6 +372,37 @@ def _migrate(db: sqlite3.Connection, previous: int) -> None:
         if removed:
             log.info("Removed %d built-in 'GREAT VALUE' rule(s): a brand, not a "
                      "category", removed)
+
+    if previous < 3:
+        # Version 3 adds the abbreviation and brand rules the offline OCR engine
+        # needs. _seed_rules only ever fires on an empty database -- deliberately,
+        # so that rules the user deleted stay deleted -- which means existing
+        # books would otherwise never see these. A pattern the user already has,
+        # built-in or their own, is left exactly as it is.
+        ids = {
+            row["name"]: row["id"]
+            for row in db.execute("SELECT id, name FROM category").fetchall()
+        }
+        added = 0
+        for pattern, category, field, priority in RULES_ADDED_IN_V3:
+            category_id = ids.get(category)
+            if category_id is None:
+                continue
+            clash = db.execute(
+                "SELECT 1 FROM category_rule WHERE field = ? AND pattern = ?",
+                (field, pattern),
+            ).fetchone()
+            if clash:
+                continue
+            db.execute(
+                "INSERT INTO category_rule (field, match_type, pattern, category_id, "
+                "priority, enabled, is_builtin) VALUES (?, 'contains', ?, ?, ?, 1, 1)",
+                (field, pattern, category_id, priority),
+            )
+            added += 1
+        if added:
+            log.info("Added %d built-in categorisation rules for abbreviated "
+                     "item names", added)
 
 
 def _seed_categories(db: sqlite3.Connection) -> None:

@@ -34,12 +34,19 @@ datas = [
 ]
 binaries = []
 
-# pytesseract is imported lazily by the offline OCR engine, so the analysis
-# cannot see it. The Tesseract binary itself is not bundled -- it is a separate
-# install, by design.
+# Both offline engines import lazily -- inside the method that uses them -- so
+# the analysis cannot see either. The Tesseract binary is not bundled; it is a
+# separate install, by design. The Windows OCR recogniser is not bundled either,
+# and cannot be: it is part of the operating system, and these packages are only
+# the bindings that reach it.
 hiddenimports = ['pytesseract']
 
-for package in ('anthropic', 'httpx', 'httpcore', 'certifi'):
+for package in ('winrt.windows.media.ocr', 'winrt.windows.graphics.imaging',
+                'winrt.windows.storage.streams', 'winrt.windows.globalization',
+                'winrt.windows.foundation', 'winrt.windows.foundation.collections'):
+    hiddenimports.append(package)
+
+for package in ('anthropic', 'httpx', 'httpcore', 'certifi', 'winrt'):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
     binaries += package_binaries

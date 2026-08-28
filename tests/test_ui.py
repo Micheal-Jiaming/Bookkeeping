@@ -112,9 +112,18 @@ def test_every_page_builds_and_can_be_shown(window):
         assert window.pages[key].frame.winfo_exists()
 
 
-def test_the_engine_pill_says_when_nothing_is_configured(window):
+def test_the_engine_pill_names_the_engines_that_are_ready(window):
+    """With no key and no Tesseract, Windows OCR alone should carry the app.
+
+    This test used to assert the pill read "no engine", which was true and was
+    the whole problem: a fresh copy could not read a receipt at all. The offline
+    Windows engine needs no key and no install, so on any Windows machine with a
+    language pack the pill now names it.
+    """
     window.update_engine_pill()
-    assert "no engine" in window.engine_pill.cget("text")
+    text = window.engine_pill.cget("text")
+    assert "no engine" not in text
+    assert "windows" in text
 
 
 def test_switching_theme_rebuilds_the_window_and_is_remembered(window, books):
