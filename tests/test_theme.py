@@ -70,13 +70,16 @@ NAMES = sorted(THEMES)
 # for non-text UI -- which is what the accent is, filling a chart bar, and what
 # a bold button label is.
 #
-# The 3.0 on the last three rows is a deliberate local relaxation rather than
-# anything WCAG says: hint text and the two status words are small text, so AA
-# would want 4.5. They are held to 3.0 because each is a short, repeated,
-# secondary label sitting beside the same information in full-contrast text, and
-# holding them to 4.5 would force every palette's greys and status colours
-# almost to the body-text colour and flatten the hierarchy. Raising them is a
-# design decision, not a bug fix.
+# The DIM, GOOD and BAD rows take 3.0 as a deliberate local relaxation rather
+# than anything WCAG says: all three are small text, which AA would hold to 4.5.
+# They sit at 3.0 because each is a short, repeated, secondary label that always
+# appears beside the same information in full-contrast text.
+#
+# Of the four palettes shipping today only DIM (3.49 solarized, 3.50 light) and
+# BAD (3.62 dark) actually fall below 4.5; GOOD clears it everywhere, from 4.75
+# to 10.38. So the floor is headroom for a palette that wants a genuinely grey
+# grey, not an excuse for the present ones. Raising it is a design decision, not
+# a bug fix.
 READABILITY = [
     ("accent on the chart surface", "ACCENT", "CARD", 3.0),
     ("body text on a card", "FG", "CARD", 4.5),

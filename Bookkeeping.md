@@ -703,13 +703,13 @@ when done, and check with
 | `tests/test_units.py` | 295 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
-| `tests/test_theme.py` | 157 | every palette's contrast and status-distinctness |
+| `tests/test_theme.py` | 160 | every palette's contrast and status-distinctness |
 | `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-9 215 lines of Python. Not in version control: `data/` (the user's books),
+9 218 lines of Python. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
