@@ -477,3 +477,21 @@ def test_a_single_item_receipt_is_never_emptied_by_that_rule():
     receipt = parse_receipt_text(
         "CORNER SHOP\nBread 3.50\nTOTAL 3.50\n")
     assert [i.description for i in receipt.items] == ["Bread"]
+
+
+def test_a_cash_rounding_line_is_not_a_purchase():
+    """Walmart prints ROUNDING between TOTAL and CHANGE DUE, with an amount.
+
+    It reached the item list and put four cents of nothing into the books --
+    small, but it is money the receipt never spent, and it broke the one check
+    that says whether a reading hangs together.
+    """
+    receipt = parse_receipt_text(
+        "Walmart\n"
+        "GV WHL MILK 007874203912 3.24 X\n"
+        "SUBTOTAL 3.24\n"
+        "TOTAL 3.42\n"
+        "CASH TEND 5.00\n"
+        "ROUNDING 0.04\n"
+        "CHANGE DUE 1.58\n")
+    assert [i.description for i in receipt.items] == ["GV WHL MILK"]

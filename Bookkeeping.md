@@ -307,8 +307,8 @@ on:
 | | one pass | two passes |
 | --- | --- | --- |
 | Summary figures found (subtotal, tax, total) | 14 of 18 | **16 of 18** |
-| Money the line items could not account for | $44.02 | **$28.43** |
-| Line items found | 66 | **70** |
+| Money the line items could not account for | $44.02 | **$28.47** |
+| Line items found | 66 | **69** |
 
 No receipt was worse on any measure. The second pass costs about two tenths of a
 second against the seconds a scan already takes.
@@ -998,7 +998,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 300 tests pass** (`pytest tests/ -q`, ~65 s):
+**Automated — 301 tests pass** (`pytest tests/ -q`, ~65 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -1268,7 +1268,7 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.9.0, for whoever reads this next:
+The state as of 1.9.1, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
@@ -1647,7 +1647,7 @@ The state as of 1.9.0, for whoever reads this next:
     image 34/36 against 30/36 -- a metric blind to *which* lines are missed and
     ignoring the header entirely. Later, a merge simulated outside the pipeline
     predicted 17/18 header fields and $25.47 unaccounted; run through the real
-    pipeline it was 16/18 and $28.43. Both times the shortcut flattered the
+    pipeline it was 16/18 and $28.47. Both times the shortcut flattered the
     change. **Score a reading by what a user would notice -- the totals, and how
     far the lines are from the subtotal -- and measure it through the pipeline
     the user actually runs** (`app/extract/windows_ocr.py`).
@@ -1803,6 +1803,21 @@ The state as of 1.9.0, for whoever reads this next:
     a real answer. Only a service that actually replied may be recorded
     (`app/lookup/translate.py`, `tests/test_i18n.py`).
 
+40. **A cash-rounding line is not a purchase.** Walmart prints `ROUNDING 0.04`
+    between TOTAL and CHANGE DUE, in the item column, with an amount. It was
+    read as a line item, which put four cents of money the receipt never spent
+    into the books and broke the one check that says whether a reading hangs
+    together.
+
+    It surfaced only when a real scan was looked at line by line, which is worth
+    noting: the figures reported for 1.8.0 counted it as a successful item, so
+    "24 of 24 lines on Walmart1" was really 23 real lines plus this. The
+    corrected totals are in §3 -- 69 line items rather than 70, and $28.47
+    unaccounted rather than $28.43. **A count of items found is not a measure of
+    items read correctly**, and this is the second time in this project that
+    exact trap has flattered a change (see 11.32)
+    (`app/extract/receipt_text.py`, `tests/test_units.py`).
+
 ---
 
 ## 12. Version control
@@ -1890,9 +1905,10 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.9.1 | 2026-08-31 | **A cash-rounding line was being spent.** Re-scanning the real books after 1.9.0 showed `ROUNDING 0.04` sitting in the item list: Walmart prints it between TOTAL and CHANGE DUE, in the item column, with an amount, and it was read as a purchase. Four cents of money the receipt never spent, and it broke the check that says whether a reading adds up. It also means the 1.8.0 figures counted it as a success — "24 of 24" on Walmart1 was 23 real lines plus this — so the totals in §3 are corrected to 69 items and $28.47 unaccounted (§11.40). 301 tests. |
 | 1.9.0 | 2026-08-31 | **The interface, and the receipts, in Chinese.** View → Language switches the whole interface between English and Chinese, and the item names read off a receipt are machine-translated to match. The English text is the translation key, so the source still reads as prose and a missing entry falls back to English rather than showing a bare key; a test compares every key against the string constants the code actually contains, so editing an English string cannot silently orphan its translation. Chinese only, asserted by a test (§11.37). Three things that had to be got right: a combobox hands back the text on screen, so settings looked up by their English label broke (§11.38); Segoe UI has no Chinese glyphs, so the font family follows the language; and switching language rebuilds every widget, exactly as switching theme does. Item names are translated during the scan and cached in a `translation` table (schema v6), never while drawing the review pane — a network request on the interface thread would freeze the window. The Google endpoint every snippet on the internet uses is blocked from this address on the very first request; the one its Chrome extension uses works (§11.39). 300 tests. |
 | 1.8.1 | 2026-08-31 | **A refusal stops looking like a crash.** The single-instance guard announced itself with a red error icon and wrote an ERROR line to the log for something that had gone right, and `verify_exe.py` proved that guard by flashing the dialog across the real desktop during every build — which the user reasonably took for a fault. The message now uses an information icon and logs at INFO, the `--allow-second-window` hint moved from the dialog into the log, and the verification runs the duplicate on a private Windows desktop, confirming the refusal from the log and the exit code instead of a window title (§11.36). No behaviour under test was suppressed. 282 tests. |
-| 1.8.0 | 2026-08-31 | **Every receipt is now read twice.** With no API key and no paid services on the table, the remaining accuracy had to come from what is already installed — so Windows OCR runs over each image at the stored size *and* shrunk to a 1176-pixel long edge, and the two readings are combined. Neither size wins outright: full size is better at the summary block, the reduced size is better at line items (§3). The one judgement — which set of line items to keep — is made by the receipt itself, whichever list lands closer to the printed subtotal, so a pass that invents lines is rejected by its own arithmetic. Measured through the real pipeline with the second pass off and on: summary figures found 14 of 18 → **16 of 18**, money the line items could not account for **$44.02 → $28.43**, line items found 66 → 70, and no receipt worse on any measure. Cost is about two tenths of a second. This supersedes the 1.5.2 decision to revert downscaling: replacing the full-size read was wrong, adding to it is right (11.32). |
+| 1.8.0 | 2026-08-31 | **Every receipt is now read twice.** With no API key and no paid services on the table, the remaining accuracy had to come from what is already installed — so Windows OCR runs over each image at the stored size *and* shrunk to a 1176-pixel long edge, and the two readings are combined. Neither size wins outright: full size is better at the summary block, the reduced size is better at line items (§3). The one judgement — which set of line items to keep — is made by the receipt itself, whichever list lands closer to the printed subtotal, so a pass that invents lines is rejected by its own arithmetic. Measured through the real pipeline with the second pass off and on: summary figures found 14 of 18 → **16 of 18**, money the line items could not account for **$44.02 → $28.47**, line items found 66 → 69, and no receipt worse on any measure. Cost is about two tenths of a second. This supersedes the 1.5.2 decision to revert downscaling: replacing the full-size read was wrong, adding to it is right (11.32). |
 | 1.7.0 | 2026-08-31 | **Categorisation learns the language of shopping, and a controlled test of photo quality.** The user re-photographed one Aldi receipt flat and evenly lit, which answered a question the project could not answer for itself: the identical receipt went from 11 of 18 line items to **17 of 18**, with the missing $4.58 being exactly the remaining shortfall. Photograph quality is the largest single lever on accuracy and it belongs to the user, not the code (section 9). What it did not fix was the item *names* — 3 of 18 either way — so the rules had to be made noise-tolerant instead. Schema v5 seeds 63 more keyword rules: fresh produce, chilled and pantry staples, meat and fish, disposables, and merchant defaults for the supermarkets near these receipts. Categorisation on the two Aldi receipts went from **1 of 18 to 24 of 24**, and Walmart improved from 12 of 20 to 15 of 20 as a side effect. Choosing those patterns re-applied 11.22's substring trap, which bites harder on ordinary words than on brands: EGGS and not EGG because of LEGGINGS, BEANS and not BEAN because of BEANIE, and RICE, HAM, OATS and CREAM all rejected outright (11.35). 282 tests. |
 | 1.6.0 | 2026-08-31 | **A second chain: the parser stops assuming Walmart.** The user supplied two Aldi receipts, and they broke the reader badly -- one read as *zero* real items, its only "item" being the Mastercard line. Five structural assumptions were at fault, all recorded in 11.33: a two-letter tax flag (`FA`, `NB`) that a one-letter pattern rejected outright, an item number printed before the name instead of a barcode after it, weighed goods laid out in the opposite order, one tax line per band with the zero band last, and a clipped `AMOUNT D` where `AMOUNT DUE` was expected. Payment lines are now recognised by shape rather than by name, because OCR turned `Mastercard` into `Mas*ercard` (11.34). Result: `ALDI2.jpg` reads all 7 items with every amount exact and summing exactly to the printed subtotal; `ALDI1.jpg` -- a badly crumpled photo with shadows across the item block -- reads 11 of 18 with subtotal, tax and total all exact. What it still misses there is OCR quality, not parsing. The three Walmart readings are unchanged, which was checked rather than assumed. Photographs now live in `pictures\` and remain gitignored. 282 tests. |
 | 1.5.2 | 2026-08-31 | **All three receipts through the real OCR engine, as images.** The user put the photographs on disk, so the pipeline was finally exercised end to end rather than on transcriptions. Results in section 9: the totals block is read exactly on two of three, every line item on `Walmart2.jpg`, and every reading is flagged honestly for what it missed. Two findings worth more than the numbers. **Rotation turned out to be a non-issue** -- the sideways photograph carries an EXIF orientation tag and `images.normalise` already honours it, so the try-every-orientation work floated in 1.5.1 is not needed (section 9). **A misread barcode digit produces a confidently wrong product name** -- a toothpaste came back as an Audi cylinder head gasket -- and it cannot be detected, because recomputing Walmart's missing check digit discards the only error detection a barcode has. Two mitigations were built and measured and neither worked; what shipped is the review pane labelling every expansion "from barcode:", so a reviewer weighs it rather than trusting it (11.31). Separately, shrinking the image for OCR was implemented, measured and reverted: it finds more line items but loses the TOTAL on all three receipts (11.32). 274 tests. |

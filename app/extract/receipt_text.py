@@ -96,6 +96,10 @@ _DATE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 _SUMMARY_WORDS = (
     "SUBTOTAL", "SUB TOTAL", "TOTAL", "TAX", "TIP", "GRATUITY", "BALANCE",
     "CHANGE", "CASH", "DEBIT", "CREDIT", "VISA", "MASTERCARD", "AMEX",
+    # Walmart prints a cash-rounding adjustment between TOTAL and CHANGE
+    # DUE. It carries an amount in the item column and was being counted
+    # as a purchase, which put 4 cents of nothing into the books.
+    "ROUNDING",
     "DISCOVER", "TEND", "PAYMENT", "AMOUNT DUE", "SAVINGS", "ITEMS SOLD",
     "TC#", "REF #", "APPROVAL", "AUTH", "ACCOUNT", "NETWORK ID", "TERMINAL",
     "THANK YOU", "SURVEY", "www.", "POINTS", "REWARD", "MEMBER", "STORE #",
