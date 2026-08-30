@@ -1044,7 +1044,10 @@ Python, no venv, no source) — re-run for 1.5.1 with `tools\verify_exe.py`:
   PyInstaller bundled the `winrt` bindings correctly — an import that works from
   source proves nothing about the .exe. This is what `_log_engines()` in
   `app/ui/window.py` exists for.
-- A **second launch is refused** with an "Already running" dialog and exits 0.
+- A **second launch is refused** and exits 0. Since 1.8.1 the duplicate runs
+  on a Windows desktop of its own, so its dialog never reaches the screen,
+  and the refusal is confirmed from the log line rather than a window title
+  (§11.36).
 - **Closing the window exits cleanly** (code 0), and `--version` afterwards
   prints `1.5.1` — proving the lock was released.
 - Startup measured at **3.4–3.6 s** to a visible window, over three runs.
@@ -1186,7 +1189,7 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.8.0, for whoever reads this next:
+The state as of 1.8.1, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
@@ -1653,6 +1656,44 @@ The state as of 1.8.0, for whoever reads this next:
     "ARTISAN BOULE"; a test whose fixture quietly starts matching a rule has
     stopped testing what its name claims (`app/db.py`, `tests/test_store.py`).
 
+36. **A refusal is not an error, and a verification must not look like a fault.**
+    Two small things that together wasted real time. The single-instance guard
+    reported "Bookkeeping is already open for these books" through
+    `report_fatal`, which meant a red cross — the same icon as a crash — and an
+    ERROR line in the log for something that had gone exactly right. And
+    `verify_exe.py` proved that guard by launching a duplicate on the real
+    desktop and closing its dialog a second later, so every build flashed what
+    looked like an error past the user.
+
+    The user asked what it was, and the honest answer took a while to reach
+    because **an ERROR line in a log should mean the program broke.** Here it
+    meant the opposite, which is precisely the noise that makes a log useless
+    when something genuinely does go wrong.
+
+    Both fixed. `report_startup(..., fatal=False)` uses an information icon and
+    logs at INFO; the `--allow-second-window` hint moved out of the dialog,
+    where it meant nothing to anyone who had simply double-clicked twice, and
+    into the log. `verify_exe.run_unseen` starts the duplicate on a Windows
+    desktop of its own, so it is refused and paints its dialog normally,
+    somewhere nobody is looking. The check got sturdier in the process: it now
+    confirms the refusal from the log line and the exit code rather than by
+    matching a window title (`app/launcher.py`, `tools/verify_exe.py`).
+
+    Two traps found while building the off-screen check, both worth keeping:
+
+    * **A modal dialog moved out of sight still has to be dismissed.** The first
+      version simply started the duplicate on the private desktop and waited for
+      it to exit. It never did: `MessageBoxW` blocks until something clicks it,
+      and on a desktop nobody is watching, nothing does. The check timed out and
+      reported a perfectly good build as broken. `run_unseen` now finds the
+      dialog with `EnumDesktopWindows` and posts `WM_CLOSE` to it there.
+    * **`ctypes` truncates a 64-bit handle unless you declare the signature.**
+      Every foreign function defaults to returning a C `int`, so `CreateDesktopW`
+      returned a mangled handle and `CreateProcessW` rejected it — with the
+      failure looking identical to "this machine will not allow a second
+      desktop". Declaring `restype` and `argtypes` is not tidiness here; it is
+      the difference between working and not.
+
 ---
 
 ## 12. Version control
@@ -1740,6 +1781,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.8.1 | 2026-08-31 | **A refusal stops looking like a crash.** The single-instance guard announced itself with a red error icon and wrote an ERROR line to the log for something that had gone right, and `verify_exe.py` proved that guard by flashing the dialog across the real desktop during every build — which the user reasonably took for a fault. The message now uses an information icon and logs at INFO, the `--allow-second-window` hint moved from the dialog into the log, and the verification runs the duplicate on a private Windows desktop, confirming the refusal from the log and the exit code instead of a window title (§11.36). No behaviour under test was suppressed. 282 tests. |
 | 1.8.0 | 2026-08-31 | **Every receipt is now read twice.** With no API key and no paid services on the table, the remaining accuracy had to come from what is already installed — so Windows OCR runs over each image at the stored size *and* shrunk to a 1176-pixel long edge, and the two readings are combined. Neither size wins outright: full size is better at the summary block, the reduced size is better at line items (§3). The one judgement — which set of line items to keep — is made by the receipt itself, whichever list lands closer to the printed subtotal, so a pass that invents lines is rejected by its own arithmetic. Measured through the real pipeline with the second pass off and on: summary figures found 14 of 18 → **16 of 18**, money the line items could not account for **$44.02 → $28.43**, line items found 66 → 70, and no receipt worse on any measure. Cost is about two tenths of a second. This supersedes the 1.5.2 decision to revert downscaling: replacing the full-size read was wrong, adding to it is right (11.32). |
 | 1.7.0 | 2026-08-31 | **Categorisation learns the language of shopping, and a controlled test of photo quality.** The user re-photographed one Aldi receipt flat and evenly lit, which answered a question the project could not answer for itself: the identical receipt went from 11 of 18 line items to **17 of 18**, with the missing $4.58 being exactly the remaining shortfall. Photograph quality is the largest single lever on accuracy and it belongs to the user, not the code (section 9). What it did not fix was the item *names* — 3 of 18 either way — so the rules had to be made noise-tolerant instead. Schema v5 seeds 63 more keyword rules: fresh produce, chilled and pantry staples, meat and fish, disposables, and merchant defaults for the supermarkets near these receipts. Categorisation on the two Aldi receipts went from **1 of 18 to 24 of 24**, and Walmart improved from 12 of 20 to 15 of 20 as a side effect. Choosing those patterns re-applied 11.22's substring trap, which bites harder on ordinary words than on brands: EGGS and not EGG because of LEGGINGS, BEANS and not BEAN because of BEANIE, and RICE, HAM, OATS and CREAM all rejected outright (11.35). 282 tests. |
 | 1.6.0 | 2026-08-31 | **A second chain: the parser stops assuming Walmart.** The user supplied two Aldi receipts, and they broke the reader badly -- one read as *zero* real items, its only "item" being the Mastercard line. Five structural assumptions were at fault, all recorded in 11.33: a two-letter tax flag (`FA`, `NB`) that a one-letter pattern rejected outright, an item number printed before the name instead of a barcode after it, weighed goods laid out in the opposite order, one tax line per band with the zero band last, and a clipped `AMOUNT D` where `AMOUNT DUE` was expected. Payment lines are now recognised by shape rather than by name, because OCR turned `Mastercard` into `Mas*ercard` (11.34). Result: `ALDI2.jpg` reads all 7 items with every amount exact and summing exactly to the printed subtotal; `ALDI1.jpg` -- a badly crumpled photo with shadows across the item block -- reads 11 of 18 with subtotal, tax and total all exact. What it still misses there is OCR quality, not parsing. The three Walmart readings are unchanged, which was checked rather than assumed. Photographs now live in `pictures\` and remain gitignored. 282 tests. |
