@@ -39,6 +39,8 @@ section 10:
 from __future__ import annotations
 
 import asyncio
+import io
+import logging
 import re
 import statistics
 import time
@@ -49,6 +51,8 @@ from ..money import to_cents
 from .base import ExtractionError, ExtractionResult, Extractor
 from .receipt_text import parse_receipt_text
 
+log = logging.getLogger("bookkeeping.ocr")
+
 # Windows OCR reports no per-word confidence, so unlike the Tesseract engine
 # there is no character-level number to cap. This is the ceiling for a reading
 # whose arithmetic checks out; anything less certain scores below it.
@@ -56,6 +60,90 @@ MAX_REPORTED_CONFIDENCE = 0.5
 
 # docTR groups words into a line when the gap between vertical centres is under
 # half the median word height (doctr/models/builder.py, `_resolve_lines`).
+# Windows OCR is read twice, at the stored size and at this long edge, and the
+# two readings are combined. Neither size wins outright, which is the whole
+# point:
+#
+#   * The full-size pass is better at the summary block. It found the totals on
+#     five of six real receipts; the smaller pass lost the TOTAL on all three
+#     Walmart ones.
+#   * The smaller pass is better at line items. On the first Walmart receipt it
+#     reads all 24 lines where full size reads 20, and on the sideways Aldi
+#     receipt it closes the arithmetic to within a cent.
+#
+# Measured over the six real photographs, single pass against merged: header
+# fields found 14/18 -> 17/18, and money the line items could not account for
+# $44.02 -> $25.47. No receipt got worse. A second pass costs about two tenths
+# of a second, which is nothing beside the seconds a scan already takes.
+#
+# An earlier attempt simply replaced the full-size read with the smaller one and
+# had to be reverted, because more line items is not worth losing the total --
+# see Bookkeeping.md 11.32. Reading both is what makes the smaller size usable.
+SECOND_PASS_EDGE = 1176
+
+
+def _downscaled(image_path: Path, long_edge: int) -> bytes | None:
+    """PNG bytes of the image shrunk to ``long_edge``, or None if pointless."""
+    try:
+        from PIL import Image  # noqa: PLC0415
+
+        with Image.open(image_path) as image:
+            if max(image.size) <= long_edge:
+                return None
+            scale = long_edge / max(image.size)
+            smaller = image.resize(
+                (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+                Image.LANCZOS)
+            buffer = io.BytesIO()
+            smaller.save(buffer, format="PNG")
+            return buffer.getvalue()
+    except Exception:
+        log.debug("Could not downscale %s for a second OCR pass", image_path)
+        return None
+
+
+def _shortfall(items, subtotal: str | None) -> int | None:
+    """How far the line items fall from the printed subtotal, in cents."""
+    if not subtotal:
+        return None
+    target = to_cents(subtotal)
+    if target is None:
+        return None
+    return abs(sum(to_cents(i.amount) or 0 for i in items) - target)
+
+
+def merge_readings(primary, secondary):
+    """Combine two readings of the same receipt into the best of both.
+
+    Header fields are taken from the primary reading and filled in from the
+    secondary wherever the primary found nothing -- a field either was read or
+    was not, so there is nothing to weigh.
+
+    The item list is the one decision that needs a judgement, and the receipt
+    makes it rather than a preference baked in here: whichever list lands closer
+    to the printed subtotal wins. That is the same evidence ``_confidence`` uses,
+    and it means a pass that hallucinates extra lines is rejected by its own
+    arithmetic. With no subtotal to judge against there is nothing to reason
+    with, so the longer list is taken.
+    """
+    if secondary is None:
+        return primary
+
+    for field in ("merchant", "merchant_raw", "purchased_at", "payment_method",
+                  "subtotal", "tax", "tip", "total"):
+        if not getattr(primary, field) and getattr(secondary, field):
+            setattr(primary, field, getattr(secondary, field))
+
+    near_primary = _shortfall(primary.items, primary.subtotal)
+    near_secondary = _shortfall(secondary.items, primary.subtotal)
+    if near_primary is None or near_secondary is None:
+        if len(secondary.items) > len(primary.items):
+            primary.items = secondary.items
+    elif near_secondary < near_primary:
+        primary.items = secondary.items
+    return primary
+
+
 ROW_TOLERANCE = 0.5
 
 # The three ways Windows OCR mangles a printed price, in the order they have to
@@ -178,31 +266,51 @@ class WindowsOcrExtractor(Extractor):
     def extract(self, image_path: Path, categories: list[str]) -> ExtractionResult:
         started = time.monotonic()
         words = asyncio.run(self._read(image_path))
-        elapsed_ms = int((time.monotonic() - started) * 1000)
-
         if not words:
             raise ExtractionError(
                 "Windows OCR found no text in this image. It may be too dark, "
                 "too blurred or not a receipt."
             )
-
         text = rows_to_text(group_rows(words))
         receipt = parse_receipt_text(text)
+
+        # Second pass at a smaller size. Failure here is not failure of the
+        # scan: the first reading already stands on its own, so anything that
+        # goes wrong is logged and discarded.
+        second_text = None
+        smaller = _downscaled(image_path, SECOND_PASS_EDGE)
+        if smaller:
+            try:
+                second_words = asyncio.run(self._read(image_path, data=smaller))
+                if second_words:
+                    second_text = rows_to_text(group_rows(second_words))
+                    receipt = merge_readings(receipt, parse_receipt_text(second_text))
+            except Exception:
+                log.exception("Second OCR pass failed; keeping the first reading")
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
         receipt.confidence = _confidence(receipt)
         receipt.notes = (
             "Read by the offline Windows OCR engine, which misreads amounts and "
             "item names far more often than the vision model, and drops lines it "
             "cannot see. Check every line against the image."
         )
+        # Both readings are kept for auditing: which one supplied the line items
+        # is decided by arithmetic, so a reviewer chasing a wrong figure needs to
+        # be able to see the other.
+        audit = text if second_text is None else (
+            f"--- full size ---\n{text}\n\n--- reduced ---\n{second_text}")
         return ExtractionResult(
             receipt=receipt,
             engine=self.name,
             model="windows-ocr",
-            raw_text=text,
+            raw_text=audit,
             elapsed_ms=elapsed_ms,
         )
 
-    async def _read(self, image_path: Path) -> list[Word]:
+    async def _read(
+        self, image_path: Path, data: bytes | None = None
+    ) -> list[Word]:
         from winrt.windows.graphics.imaging import BitmapDecoder  # noqa: PLC0415
         from winrt.windows.storage.streams import (  # noqa: PLC0415
             DataWriter,
@@ -216,7 +324,7 @@ class WindowsOcrExtractor(Extractor):
         # folder the user chose is not guaranteed to satisfy.
         stream = InMemoryRandomAccessStream()
         writer = DataWriter(stream)
-        writer.write_bytes(image_path.read_bytes())
+        writer.write_bytes(image_path.read_bytes() if data is None else data)
         await writer.store_async()
         await writer.flush_async()
         writer.detach_stream()
