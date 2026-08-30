@@ -37,6 +37,28 @@ _QTY_AT_PRICE = re.compile(r"(?P<qty>\d+(?:\.\d+)?)\s*(?:@|X)\s*\$?(?P<unit>\d[\
 _LEADING_QTY = re.compile(r"^(?P<qty>\d{1,3})\s+(?=\D)")
 _SKU = re.compile(r"\b(\d{9,14})\b")
 
+# Goods sold by weight print across two lines: the name and barcode on one, with
+# no price at all, then the weighing on the next --
+#
+#     GINGER ROOT   000000004612 0 F
+#        0.42 lb @ 1.00 lb / 3.62         1.52 N
+#
+# Read a line at a time that loses the name: the first line has no amount so it
+# is skipped, and the second becomes an item called "0.42 lb @ 1.00 lb / 3.62".
+# The money was always right; the description was unusable. The rate reads
+# "<weight> lb @ 1 lb /<price per lb>", so the number after the slash is the
+# unit price and the one before the unit is the quantity.
+_WEIGHED = re.compile(
+    r"^\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>lb|lbs|kg|g|oz)\b.*?/\s*\$?"
+    r"(?P<price>\d[\d,]*\.\d{2})", re.IGNORECASE)
+
+# An item with no printed name: the receipt shows its barcode where the
+# description would go. Seen on a real receipt as
+# "756809105667 756809105660  5.88 X" -- the true UPC beside the truncated item
+# number. Such a line has no letters at all, so the "this is a barcode, not a
+# purchase" guard below would otherwise reject it, silently losing $5.88.
+_BARE_BARCODE = re.compile(r"^\d{9,14}$")
+
 _DATE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b"), "ymd"),
     (re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b"), "mdy"),
@@ -205,12 +227,19 @@ def _is_summary_line(upper: str) -> bool:
 
 def _find_items(lines: list[str]) -> list[ExtractedItem]:
     items: list[ExtractedItem] = []
+    # A name and barcode seen on a line that carried no price. Goods sold by
+    # weight print that way, with the money on the line below; holding the name
+    # for exactly one line is what lets the two halves be joined back together.
+    carried: tuple[str, str | None] | None = None
+
     for line in lines:
         upper = line.upper()
         if _is_summary_line(upper):
+            carried = None
             continue
         match = _TRAILING_AMOUNT.search(line.replace("$", " $"))
         if not match:
+            carried = _name_without_price(line) or None
             continue
         amount_text = _trailing_amount_text(line)
         if amount_text is None:
@@ -234,21 +263,33 @@ def _find_items(lines: list[str]) -> list[ExtractedItem]:
 
         quantity: float | None = None
         unit_price: str | None = None
-        qty_match = _QTY_AT_PRICE.search(head)
-        if qty_match:
-            quantity = float(qty_match.group("qty"))
-            unit_price = qty_match.group("unit").replace(",", "")
-            head = head[: qty_match.start()].strip(" .-*x")
+        weighed = _WEIGHED.match(head)
+        if weighed and carried:
+            # The weighing half of a two-line item: take the name and barcode
+            # from the line above and the rate from this one.
+            quantity = float(weighed.group("qty"))
+            unit_price = weighed.group("price").replace(",", "")
+            head, sku = carried[0], sku or carried[1]
         else:
-            lead = _LEADING_QTY.match(head)
-            if lead:
-                quantity = float(lead.group("qty"))
-                head = head[lead.end():].strip()
+            qty_match = _QTY_AT_PRICE.search(head)
+            if qty_match:
+                quantity = float(qty_match.group("qty"))
+                unit_price = qty_match.group("unit").replace(",", "")
+                head = head[: qty_match.start()].strip(" .-*x")
+            else:
+                lead = _LEADING_QTY.match(head)
+                if lead:
+                    quantity = float(lead.group("qty"))
+                    head = head[lead.end():].strip()
+        carried = None
 
         description = re.sub(r"\s{2,}", " ", head).strip(" .-*")
         # A "description" of one character or pure punctuation means the regex
-        # latched onto a barcode or a phone number, not a purchase.
-        if len(re.sub(r"[^A-Za-z]", "", description)) < 2:
+        # latched onto a barcode or a phone number, not a purchase. A bare
+        # barcode is the exception: some items have no printed name at all, and
+        # rejecting those loses real money off the receipt.
+        if (len(re.sub(r"[^A-Za-z]", "", description)) < 2
+                and not _BARE_BARCODE.match(description)):
             continue
         if to_cents(amount_text) in (None, 0):
             continue
@@ -267,3 +308,18 @@ def _find_items(lines: list[str]) -> list[ExtractedItem]:
             )
         )
     return items
+
+
+def _name_without_price(line: str) -> tuple[str, str | None] | None:
+    """A line that names an item and gives its barcode, but quotes no price.
+
+    That is the first half of a weighed item. Anything else -- a slogan, an
+    address, a line with no barcode at all -- is not worth carrying forward.
+    """
+    sku_match = _SKU.search(line)
+    if not sku_match:
+        return None
+    head = line[: sku_match.start()].strip(" .-*")
+    if len(re.sub(r"[^A-Za-z]", "", head)) < 2:
+        return None
+    return re.sub(r"\s{2,}", " ", head).strip(" .-*"), sku_match.group(1)

@@ -42,13 +42,29 @@ def barcode_for(printed: str | None) -> str | None:
 
     A code that already validates is returned untouched, because a receipt from
     another chain may well print the real twelve-digit barcode and rebuilding
-    that would corrupt a working code. Anything else is rebuilt from its first
-    eleven digits, which is the Walmart case.
+    that would corrupt a working code.
 
-    ``None`` for anything unusable -- the wrong length, non-numeric, or in a
-    locally assigned number system that no global database can resolve.
+    Otherwise it is rebuilt from the first eleven digits, but **only when the
+    printed code ends in a zero** -- that zero is the padding Walmart puts where
+    the check digit belongs, and it is the evidence that this is a truncated
+    code rather than something else. Rebuilding an invalid code that ends in any
+    other digit would be a guess, and a guess that happens to land on a real
+    barcode would label the line with somebody else's product. Two such codes
+    appear on one real receipt: a Maine bottle deposit (`000787423909`) and a
+    produce PLU (`000000004612`). Neither is a barcode; both are correctly left
+    alone.
+
+    ``None`` for anything unusable -- the wrong length, non-numeric, in a
+    locally assigned number system, or a guess we decline to make.
     """
     digits = "".join(c for c in (printed or "") if c.isdigit())
     if len(digits) != 12 or digits[0] in LOCALLY_ASSIGNED:
         return None
-    return digits if is_valid(digits) else digits[:11] + check_digit(digits[:11])
+    # No GS1 company prefix begins with six zeros; a code that does is a PLU or
+    # a till's own numbering padded out to twelve columns. Asking about one is a
+    # request spent to learn nothing.
+    if digits.startswith("000000"):
+        return None
+    if is_valid(digits):
+        return digits
+    return digits[:11] + check_digit(digits[:11]) if digits.endswith("0") else None

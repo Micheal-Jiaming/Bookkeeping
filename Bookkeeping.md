@@ -295,6 +295,25 @@ indistinguishable from "this product does not exist", so the failure looks like
 the lookup service being useless rather than like a bug. `app/lookup/upc.py`
 recomputes the check digit, and that alone is what makes the feature work.
 
+
+**Two later receipts confirmed the zero-padding rule from the receipt itself.**
+One line read `756809105667 756809105660  5.88 X` -- an item with no printed
+name, showing the true UPC (whose check digit really is 7) beside the same code
+with that digit replaced by a zero. That is the truncation written out in full,
+on a single line, by the till.
+
+They also showed where the repair must **stop**. Two codes did not end in a
+zero: a Maine bottle deposit (`000787423909`) and a produce PLU
+(`000000004612`). Neither is a barcode. Rebuilding them would be a guess, and
+the dangerous outcome is not a guess that fails but one that succeeds -- landing
+on a real product and labelling the line with somebody else's goods. The trailing
+zero is the evidence of truncation, so without it `barcode_for` declines. Codes
+beginning with six zeros are refused outright, since no GS1 company prefix looks
+like that; they are PLUs padded out to twelve columns.
+
+Measured across those two receipts: **7 of 9 usable barcodes resolved**, and on
+the larger of the two, 6 of 6.
+
 Two free, keyless sources answer, and they are complementary rather than
 redundant:
 
@@ -845,7 +864,7 @@ when done, and check with
 | `tools/screenshot_pages.py` | 124 | opens the window and screenshots every page |
 | `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
 | `tests/test_ui.py` | 471 | builds the real window and drives it |
-| `tests/test_units.py` | 295 | money, validation, precedence, OCR-text parsing |
+| `tests/test_units.py` | 383 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
 | `tests/test_theme.py` | 160 | every palette's contrast and status-distinctness |
@@ -865,7 +884,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 259 tests pass** (`pytest tests/ -q`, ~58 s):
+**Automated — 274 tests pass** (`pytest tests/ -q`, ~55 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -887,7 +906,21 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   bundled-resource paths under a simulated `sys._MEIPASS`, the single-instance
   lock (same folder refused, two folders both allowed, released on exit), and
   logging to the data folder.
-- **The product-name lookup** (`tests/test_product_lookup.py`, 38 tests): the
+- **Two more real Walmart receipts** (Scarborough ME, 2026-08-29) were supplied
+  by the user and both are now permanent fixtures in `tests/test_units.py`.
+  Each exposed a defect the first receipt could not: an item printed with no
+  name at all, and an item sold by weight across two lines (11.29, 11.30). With
+  those fixed, every printed amount on both receipts is read and the line items
+  sum exactly to the printed subtotal -- 23.52 and 35.10. Of their usable
+  barcodes, 7 of 9 resolved to product names, and 6 of 6 on the larger receipt.
+
+  **What this does and does not show.** These are transcriptions of the printed
+  text, so they exercise the parser and the lookup, *not* the recognition stage.
+  The photographs were supplied through the conversation rather than as files,
+  so no OCR engine has been run against them. That matters most for the second
+  one, which is photographed sideways: whether Windows OCR copes with a rotated
+  receipt is untested, and the current pipeline has no rotation handling at all.
+- **The product-name lookup** (`tests/test_product_lookup.py`, 49 tests): the
   check-digit repair against all eight real receipt codes, both sources' parsers,
   the fallback from food database to catalogue, and — the ones that matter — that
   a refused request is never cached as "product unknown", and that one source
@@ -907,9 +940,9 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   description; and the reading of the real receipt is asserted end to end.
 
 **By hand, against the built `Bookkeeping.exe` copied to an empty folder** (no
-Python, no venv, no source) — re-run for 1.5.0 with `tools\verify_exe.py`:
+Python, no venv, no source) — re-run for 1.5.1 with `tools\verify_exe.py`:
 
-- It opens a window titled `Bookkeeping 1.5.0`, class `TkTopLevel`, with the
+- It opens a window titled `Bookkeeping 1.5.1`, class `TkTopLevel`, with the
   receipt icon in the title bar and the File/View/Help menus.
 - It creates `data\bookkeeping.db` (60 KB, seeded) and `data\bookkeeping.log`
   beside itself.
@@ -920,7 +953,7 @@ Python, no venv, no source) — re-run for 1.5.0 with `tools\verify_exe.py`:
   `app/ui/window.py` exists for.
 - A **second launch is refused** with an "Already running" dialog and exits 0.
 - **Closing the window exits cleanly** (code 0), and `--version` afterwards
-  prints `1.5.0` — proving the lock was released.
+  prints `1.5.1` — proving the lock was released.
 - Startup measured at **3.4–3.6 s** to a visible window, over three runs.
 - The four pages and every theme were screenshotted from the running program and
   inspected: list, review pane with the image and a real arithmetic flag, charts
@@ -1048,9 +1081,9 @@ are not guessable from the printed text alone.
   receipt. The .exe is unsigned and carries no Mark of the Web here, so the
   SmartScreen dialog is **predicted from the mechanism, not observed** — nobody
   has yet downloaded this build onto a machine that would show it (§7).
-- **The product lookup has been measured against one receipt's barcodes.** The
-  12-of-20 and 8-of-20 figures are that receipt's, on one day, from one IP
-  address. What the free services know about a *different* shop's goods is
+- **The product lookup has been measured against three receipts' barcodes.**
+  The 12-of-20, 8-of-20 and 7-of-9 figures are those receipts', on two days,
+  from one IP address. What the free services know about a *different* shop's goods is
   unmeasured, and both are third parties who may change their terms, their
   rate limits or their JSON at any time — the code treats every one of those as
   a non-answer rather than a crash, but the coverage figure would move.
@@ -1060,7 +1093,7 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.5.0, for whoever reads this next:
+The state as of 1.5.1, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
@@ -1085,13 +1118,22 @@ The state as of 1.5.0, for whoever reads this next:
   key ever appears, the comparison to run is against the fixture in
   `tests/test_real_receipt.py` (merchant `null`, date `null`, subtotal 141.94,
   tax 7.50, total 149.44, 24 lines).
-- **The one genuinely open verification: more real receipts.** Everything known
-  about offline accuracy comes from one photograph — 20 of 24 lines, $10.33 of
-  $141.94 unaccounted, and now 17 of 20 lines categorised correctly. Those are
-  this receipt's numbers, not accuracy figures. The user has offered photographs
-  from other supermarkets; a restaurant bill, a fuel receipt or a faded one would
-  each say something the current fixture cannot. **This is the highest-value
-  thing to ask them for.**
+- **The one genuinely open verification: OCR against more real photographs.**
+  Three real Walmart receipts are now fixtures, and the two added in 1.5.1 each
+  found a parser defect the first could not -- so more receipts keep paying off.
+  But those two arrived as images in a conversation rather than as files, so
+  only their *text* has been through the code; no OCR engine has ever seen them.
+  **Ask the user to save the photographs to disk** and put them through a real
+  scan. Two things to watch for:
+  1. **Rotation.** One of the two is photographed sideways, and the pipeline has
+     no rotation handling whatsoever. Windows OCR is unlikely to read a receipt
+     turned 90 degrees. The fix, if it is needed, is to try the other three
+     orientations when a reading finds no total and keep the best -- but that
+     costs up to four times the scan time, so measure before building it.
+  2. **A non-Walmart receipt.** Everything known about this app is Walmart's
+     layout, Walmart's abbreviations and Walmart's truncated barcodes. A
+     restaurant bill or a fuel receipt would test assumptions that are currently
+     invisible because nothing has contradicted them.
 - **The known weakness**, if you are deciding what to build: the barcode lookup
   resolves at best 12 of 20 lines, so more than a third of a receipt still shows
   only the till's shorthand. §13.2 (learn a rule from a reviewer's correction) is
@@ -1331,6 +1373,33 @@ The state as of 1.5.0, for whoever reads this next:
     Food Facts would happily have named came back blank — 5 of 20 rather than 8
     (`app/lookup/product_names.py`, `tests/test_product_lookup.py`).
 
+29. **An item with no printed name must still be counted.** Some lines carry a
+    barcode where the description belongs -- `756809105667 756809105660 5.88 X`
+    on a real receipt. The guard that rejects a "description" with no letters,
+    which exists to keep phone numbers and barcodes out of the item list, threw
+    the whole line away. The only symptom was $5.88 missing from a $23.52
+    receipt: no error, no warning, just a subtotal that would not reconcile.
+    A description that is *nothing but* a 9-14 digit barcode is now accepted;
+    everything else the guard rejected, it still rejects, and a test asserts a
+    phone number is still not an item (`app/extract/receipt_text.py`,
+    `tests/test_units.py`).
+
+30. **Goods sold by weight print across two lines, and the parser must join
+    them.** The name and barcode are on one line with no price at all, and the
+    weighing is on the next:
+
+        GINGER ROOT   000000004612 0 F
+           0.42 lb @ 1.00 lb / 3.62         1.52 N
+
+    Parsed a line at a time the money came out right and the name did not -- the
+    item was called "0.42 lb @ 1.00 lb / 3.62", which is useless in a report and
+    matches no categorisation rule. `_find_items` now carries a name that
+    arrived without a price forward by exactly one line. One line, deliberately:
+    carrying it further would attach a stale name to an unrelated item, and
+    there is a test for that. The rate reads `<weight> lb @ 1 lb /<price>`, so
+    the quantity and unit price are recovered too (`app/extract/receipt_text.py`,
+    `tests/test_units.py`).
+
 ---
 
 ## 12. Version control
@@ -1418,5 +1487,6 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.5.1 | 2026-08-31 | **Two more real receipts, and the two defects they found.** The user supplied a second and third Walmart receipt, which between them broke the line parser in ways the first could not. An item printed with no name -- just its barcode where the description goes -- was thrown away entirely by the guard that keeps phone numbers out of the item list, losing $5.88 off a $23.52 receipt with no error of any kind. An item sold by weight prints its name on one line and its price on the next, so it was read with the right money and the name "0.42 lb @ 1.00 lb / 3.62". Both fixed, both now permanent fixtures; every amount on both receipts is read and sums exactly to the printed subtotal. The barcode repair was also tightened: it now rebuilds a check digit only when the printed code ends in the zero that marks a truncation, because the receipts contained two codes -- a bottle deposit and a produce PLU -- that are not barcodes at all, and a rebuilt code that happens to exist would put the wrong product on the line. One of those receipts also confirmed the whole zero-padding theory in a single line, printing `756809105667 756809105660` -- the true UPC beside its truncated form. Fixes 11.29-11.30. 274 tests. |
 | 1.5.0 | 2026-08-31 | **Item names a person can read, and the first step towards online operation.** A till prints `CLX PLNGR`; the app now shows "Clorox Plunger & Toilet Brush with Carry Caddy" underneath it. The key was noticing that the twelve digits Walmart prints beside each line are *not a valid barcode* — it prints the first eleven and pads column twelve with a zero, so seven of eight codes on the real receipt fail UPC-A validation and every database refuses them. `app/lookup/upc.py` recomputes the check digit; Open Food Facts and UPCitemdb (both free and keyless) supply the names; a `product_name` table caches hits and misses alike (schema v4). Measured: 12 of 20 lines resolve with both services, 8 with one exhausted, and correct categories rise from 14/20 to 17/20 because the expansion feeds rule matching. Walmart's own site was tested and cannot be used — it answers a bot check, not a product. Added a Settings toggle stating exactly what leaves the machine, and a full written explanation of the SmartScreen warning (§7). Fixes §11.27–§11.28. 259 tests. |
 | 1.4.1 | 2026-08-29 | Documentation reconciled against the code (/md-renew-check, full mode). Three errors in the categorisation section: it claimed 59 seeded rules when there are 113, cited `GREAT VALUE` as a seeded example after that rule was deliberately removed in schema v2, and said rules seed "only on a fresh database" when the guard is really "no built-in rule survives" and v3 migrates new rules into existing books. Also: the handoff section still described 1.3.0, the tag list and .exe verification figures were a release behind, the 60 theme tests were missing from the verified list, and the version-control section still said no GitHub remote existed. No code changed. |

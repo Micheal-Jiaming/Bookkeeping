@@ -293,3 +293,93 @@ def test_a_name_that_really_ends_in_one_letter_is_left_alone():
     """The dangling-flag rule must not eat the D off a vitamin."""
     receipt = parse_receipt_text("SHOP\nVITAMIN D 012345678901 8.99 X\nTOTAL 8.99\n")
     assert receipt.items[0].description == "VITAMIN D"
+
+
+# --- two more real Walmart receipts, 2026-08-29, Scarborough ME -------------
+#
+# These are transcriptions of the printed text rather than OCR output, so they
+# test the parser and not the recognition stage. Both exposed a defect the
+# original receipt did not: see 11.29 and 11.30.
+
+WALMART_NAMELESS_ITEM = """\
+Walmart
+WM Supercenter
+ST# 01788 OP# 009047 TE# 47 TR# 02197
+# ITEMS SOLD 3
+TC# 2596 9185 9980 4500 2582
+COTT CLN 12M 036000554800          11.67 X
+756809105667 756809105660           5.88 X
+HARDWHOOKS   850043215670           5.97 X
+                  SUBTOTAL         23.52
+      TAX1  5.5000 %                1.29
+                     TOTAL         24.81
+08/29/26                        15:46:06
+"""
+
+WALMART_WEIGHED_ITEM = """\
+Walmart
+WM Supercenter
+ST# 01788 OP# 009047 TE# 47 TR# 02195
+# ITEMS SOLD 7
+BG ALM UNVAN  194346193890 F        2.54 N
+GINGER ROOT   000000004612 0 F
+   0.42 lb @ 1.00 lb / 3.62         1.52 N
+GVCORNSTARCH  078742002830 F        1.92 N
+                  SUBTOTAL          5.98
+      TAX1  5.5000 %                0.00
+                     TOTAL          5.98
+08/29/26                        15:44:38
+"""
+
+
+def test_an_item_printed_with_no_name_is_still_counted():
+    """Losing this line loses $5.88 off a $23.52 receipt.
+
+    Some items have no name on the receipt at all -- the till prints the
+    barcode where the description would go. The guard that rejects a
+    "description" with no letters used to drop the whole line, and the only
+    symptom was a subtotal that would not reconcile.
+    """
+    receipt = parse_receipt_text(WALMART_NAMELESS_ITEM)
+    amounts = [item.amount for item in receipt.items]
+    assert amounts == ["11.67", "5.88", "5.97"]
+    assert sum(to_cents(a) for a in amounts) == to_cents(receipt.subtotal)
+
+    nameless = receipt.items[1]
+    assert nameless.sku == "756809105667"
+    assert nameless.description.isdigit(), "the barcode stands in for a name"
+
+
+def test_a_phone_number_is_still_not_an_item():
+    """The guard that change relaxed must still reject what it was built for."""
+    receipt = parse_receipt_text(
+        "Walmart\n(479) 273-4000\n207-885-5567 Mgr. KYLE\nTOTAL 5.00\n")
+    assert receipt.items == []
+
+
+def test_a_weighed_item_keeps_its_name_from_the_line_above():
+    """Goods sold by weight print their name and their price on separate lines.
+
+    Parsed a line at a time the money is right but the name is not: the item
+    came out called "0.42 lb @ 1.00 lb / 3.62".
+    """
+    receipt = parse_receipt_text(WALMART_WEIGHED_ITEM)
+    descriptions = [item.description for item in receipt.items]
+    assert descriptions == ["BG ALM UNVAN", "GINGER ROOT", "GVCORNSTARCH"]
+
+    ginger = receipt.items[1]
+    assert ginger.amount == "1.52"
+    assert ginger.quantity == 0.42
+    assert ginger.unit_price == "3.62"
+    assert ginger.sku == "000000004612"
+    assert ginger.taxable is False
+
+
+def test_a_carried_name_is_not_attached_to_an_unrelated_later_line():
+    """The name is held for one line only, or it leaks onto the next item."""
+    receipt = parse_receipt_text(
+        "Walmart\n"
+        "GINGER ROOT   000000004612 0 F\n"
+        "COKE          049000050110          3.04 X\n"
+        "TOTAL 3.04\n")
+    assert [i.description for i in receipt.items] == ["COKE"]
