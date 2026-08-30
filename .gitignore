@@ -25,6 +25,12 @@ sample-receipt.png
 # Unanchored on purpose: `tools\screenshot_pages.py` and `verify_exe.py --out`
 # both write PNGs into a subdirectory (`shots\` by default), which is exactly
 # where a root-only rule would stop protecting anything.
+# Receipt photographs. The extension rules below caught these only because
+# today's files happen to be .jpg; a receipt saved as .heic (the iPhone
+# default), .webp or a scanned .pdf would be untracked *and* unignored, and
+# the next `git add -A` would publish somebody's shopping and card digits.
+pictures/
+
 *.jpg
 *.jpeg
 *.png

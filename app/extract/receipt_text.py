@@ -30,6 +30,8 @@ from .base import ExtractedItem, ExtractedReceipt
 # reads the small capital Walmart prints as a lowercase "x" most of the time,
 # and an uppercase-only pattern silently rejected the whole line -- which cost
 # 15 of the 20 readable items on the first real receipt.
+# The flag must be separated from the amount by whitespace, or a weight line
+# like "(T) 0.02lb" parses as the amount 0.02 carrying the tax flag "lb".
 _TRAILING_AMOUNT = re.compile(
     r"(?P<amount>-?\$?\d[\d,]*\.\d{2})\s*(?P<minus>-)?"
     r"(?:\s+(?P<flag>[A-Za-z](?:\s?[A-Za-z])?))?\s*$"
@@ -48,8 +50,6 @@ _TAX_FLAGS = {
     "NB": True, "FA": False,                        # Aldi
 }
 
-# The flag must be separated from the amount by a space, or a weight line like
-# "(T) 0.02lb" parses as the amount 0.02 with the tax flag "lb".
 _QTY_AT_PRICE = re.compile(r"(?P<qty>\d+(?:\.\d+)?)\s*(?:@|X)\s*\$?(?P<unit>\d[\d,]*\.\d{2})")
 _LEADING_QTY = re.compile(r"^(?P<qty>\d{1,3})\s+(?=\D)")
 _SKU = re.compile(r"\b(\d{9,14})\b")
@@ -104,9 +104,26 @@ _SUMMARY_WORDS = (
     "TC#", "REF #", "APPROVAL", "AUTH", "ACCOUNT", "NETWORK ID", "TERMINAL",
     "THANK YOU", "SURVEY", "www.", "POINTS", "REWARD", "MEMBER", "STORE #",
     "OP#", "TE#", "TR#",
+    # "TAXI" is not a cab: Windows OCR reads Walmart's "TAX1" as it, and
+    # whole-word matching then stops TAX from covering it, which put $7.50
+    # of tax into the item list. Listed explicitly so the repair is visible.
+    # The cost is that a genuine taxi fare line would be read as summary --
+    # accepted, because this reads shop receipts and drops nothing else.
+    "TAXI",
     # Aldi's summary block and card trailer.
     "TAXABLE", "AMOUNT", "ITEMS", "APPROVED", "TRACE", "CASHIER",
 )
+# Whole-word matching: a summary word may not sit inside a longer word. The
+# lookarounds are on letters only, so "TC#" and "REF #" still match, while
+# CASH no longer matches CASHEWS.
+# Lines that hand over money, as opposed to the rest of the summary block.
+_PAYMENT_WORDS = ("MASTERCARD", "VISA", "AMEX", "DISCOVER", "DEBIT", "CREDIT",
+                  "CASH", "TEND", "PAYMENT", "CARD")
+
+_SUMMARY_RE = re.compile(
+    r"(?<![A-Z])(?:" + "|".join(re.escape(w.upper()) for w in _SUMMARY_WORDS)
+    + r")(?![A-Z])")
+
 _DISCOUNT_WORDS = (
     "COUPON", "DISCOUNT", "ROLLBACK", "MARKDOWN", "PROMO", "VOID", "REFUND",
     "PRICE CUT", "SAVED",
@@ -270,14 +287,16 @@ def _trailing_amount_text(line: str) -> str | None:
 def _is_summary_line(upper: str) -> bool:
     """Whether a line belongs to the receipt's summary rather than its purchases.
 
-    The space-stripped form is checked as well, because a till often letter-
-    spaces its emphasis: Aldi prints the grand total as "T O T A L", which
-    contains the word TOTAL only once the spaces are gone. Stripping can only
-    add matches, and every summary word is long enough that collapsing spaces
-    does not make one appear inside an ordinary item name.
+    Matched on whole words, which is not fussiness. Plain substring matching
+    made CASHEWS a summary line -- it contains CASH -- so a bag of cashews was
+    silently dropped from the receipt and its money with it. Any short word on
+    this list has the same problem waiting in it.
+
+    The space-stripped form is checked too, because a till often letter-spaces
+    its emphasis: Aldi prints the grand total as "T O T A L", which contains
+    the word TOTAL only once the spaces are gone.
     """
-    return any(word in upper or word in upper.replace(" ", "")
-               for word in _SUMMARY_WORDS)
+    return bool(_SUMMARY_RE.search(upper) or _SUMMARY_RE.search(upper.replace(" ", "")))
 
 
 def _find_items(
@@ -302,8 +321,13 @@ def _find_items(
     # Aldi prints the card total twice -- once beside the brand, once as
     # "Credit Card $17.43". OCR mangled the first into "Mas*ercard", which no
     # word list will match, but the second is clean, and the amount is the same.
+    #
+    # Only *payment* lines contribute. Taking every summary line would mean an
+    # unnamed item that happens to cost the same as the tax gets thrown away,
+    # which is a real receipt losing a real purchase to a coincidence.
     for line in lines:
-        if _is_summary_line(line.upper()):
+        upper = line.upper()
+        if any(word in upper for word in _PAYMENT_WORDS):
             amount = _trailing_amount_text(line)
             if amount:
                 payment_amounts.add(amount.strip("$ "))

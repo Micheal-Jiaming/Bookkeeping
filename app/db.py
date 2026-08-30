@@ -251,12 +251,16 @@ RULES_ADDED_IN_V3: list[tuple[str, str, str, int]] = [
 #
 #   * A pattern must not hide inside an unrelated word. EGGS is seeded and EGG
 #     is not, because LEGGINGS contains EGG. BEANS and not BEAN, because of
-#     BEANIE. RICE, HAM, OATS and CREAM were all considered and rejected --
-#     they sit inside PRICE, SHAMPOO, COATS and SUNSCREEN.
+#     BEANIE. RICE, HAM and OATS were all considered and rejected -- they sit
+#     inside PRICE, SHAMPOO and COATS. CREAM was rejected for the other
+#     reason: it is a category error rather than a substring one, since
+#     shaving cream and sunscreen are Personal Care, not Groceries.
 #   * A pattern must name a category, not a product line.
 #
-# Ordering note: these are all priority 60, the same as the other description
-# rules, so nothing here outranks a rule the user wrote themselves.
+# Ordering note: the description rules below are priority 60, the same as the
+# other description rules, so nothing here outranks a rule the user wrote
+# themselves. The merchant defaults at the end are priority 200, the weakest
+# there is, so they only decide a line nothing else could.
 RULES_ADDED_IN_V5: list[tuple[str, str, str, int]] = [
     # Fresh produce -- the largest gap, and the bulk of an Aldi receipt.
     ("PEPPER", "Groceries", "description", 60),
