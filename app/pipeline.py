@@ -120,6 +120,7 @@ def scan_now(receipt_id: int) -> dict:
         return _fetch(receipt_id)
 
     _expand_item_names(result, settings)
+    _translate_item_names(result, settings)
     _store_result(receipt_id, result, fallback_notes=attempts)
     return _fetch(receipt_id)
 
@@ -158,6 +159,38 @@ def _expand_item_names(result: ExtractionResult, settings: dict[str, str]) -> in
     if filled:
         log.info("Expanded %d of %d abbreviated item name(s)", filled, len(missing))
     return filled
+
+
+def _translate_item_names(result: ExtractionResult, settings: dict[str, str]) -> int:
+    """Fill the Chinese translation cache for this receipt's item names.
+
+    Done here rather than while drawing the review pane, because translating is
+    a network round trip per name and the interface must never wait on one. By
+    the time a receipt is reviewed the answers are already in the database, and
+    the pane reads them without touching the network.
+
+    Only runs when the interface is in Chinese. An English reader would never
+    see the result, so translating for them would be latency spent on nothing.
+    """
+    if settings.get("language", "en") != "zh":
+        return 0
+    if settings.get("translate_items", "1") != "1":
+        return 0
+
+    names = [(item.readable_name or item.description or "").strip()
+             for item in result.receipt.items]
+    names = [name for name in names if name]
+    if not names:
+        return 0
+    try:
+        translated = lookup.chinese_for(names)
+    except Exception:  # offline, a service changing shape, anything
+        log.exception("Item-name translation failed; the names stay in English")
+        return 0
+    if translated:
+        log.info("Translated %d of %d item name(s) into Chinese",
+                 len(translated), len(set(names)))
+    return len(translated)
 
 
 def _store_result(

@@ -53,7 +53,10 @@ From the user, 2026-08-23, in the order they arrived:
    names to be looked up on Walmart's website; that turned out to be impossible
    from a program, and the barcode route was used instead. Both are explained in
    §3, because the substitution was a judgement call worth recording.)
-9. **The application should ultimately operate online**, because some information
+9. **A Chinese interface, and Chinese item names.** (2026-08-31, delivered in
+   1.9.0 — see §3. Chinese only: the user asked for one extra language and said
+   so explicitly.)
+10. **The application should ultimately operate online**, because some information
    can only be obtained by querying it and accuracy depends on that. (Stated
    2026-08-31. Partly delivered in 1.5.0. This reverses the emphasis of the
    1.3.0 work without discarding it: offline operation remains the fallback that
@@ -381,6 +384,75 @@ misses is deliberate: without it the eight unresolvable lines would be re-querie
 on every scan and would exhaust the free quota on questions already answered. A
 miss is retried after 30 days, because these catalogues grow.
 
+
+### Reading the interface, and the receipt, in Chinese (1.9.0)
+
+The interface switches between English and Chinese from **View → Language**, and
+the item names read off a receipt are machine-translated to match.
+
+**The English text is the translation key.** ``t("Save draft")`` looks the
+English up in ``app/i18n.py`` and returns the Chinese; there is no catalogue of
+symbolic names, no `.po` files and no gettext dependency. The source therefore
+still reads as prose rather than as ``t("btn.save_draft")``, and a string with no
+entry falls back to showing the English instead of a bare key. The price is that
+editing an English string silently orphans its translation, so
+``tests/test_i18n.py`` compares every key against the string constants the
+source actually contains — implicit concatenation included — and fails on any
+that no longer match.
+
+**Chinese only, on purpose.** The user asked for exactly one additional language
+and said so. The machinery would take more; that is not an invitation, because
+every language added is 200-odd strings to maintain for ever. A test asserts the
+set is exactly `{en, zh}`, to make adding a third a deliberate act.
+
+Three details that are easy to get wrong:
+
+* **A combobox hands back the text on screen.** The engine picker and the status
+  filter used their English label as the lookup key, so in Chinese the lookup
+  found nothing. ``_value_for`` and ``_statuses_for`` match on the *translated*
+  label and return the English code, so what is stored stays English whatever
+  the interface shows.
+* **Segoe UI has no Chinese glyphs.** ``Theme.font`` asks ``i18n.font_family()``,
+  which returns Microsoft YaHei UI for Chinese. Without it Windows substitutes
+  per-glyph and a line ends up in two typefaces.
+* **Category names live in the database, not the code**, and get the same
+  treatment: shown translated, matched back to the English when one is
+  chosen, so the books stay in English whatever the interface shows. A
+  category the user created themselves has no translation and appears as
+  they typed it.
+* **Switching language rebuilds every widget**, exactly as switching theme does,
+  because a Tk widget holds its text as an instance option. ``set_language``
+  simply delegates to ``set_theme``.
+
+#### Translating the item names
+
+Receipts are printed in English, so this is machine translation, cached in the
+``translation`` table for the same reason product names are: it never changes,
+and the same groceries come back every week.
+
+**The endpoint everybody uses does not work.**
+``translate.googleapis.com/translate_a/single`` — the one in every snippet on the
+internet — answers `429 Too Many Requests` to the *first* request from this
+address, not after a burst. That is a block, and no amount of pacing gets around
+it. The endpoint Google's own Chrome extension uses,
+``clients5.google.com/translate_a/t?client=dict-chrome-ex``, answered twelve
+consecutive names at half a second apart without complaint, and is what the code
+calls. MyMemory is the fallback; it leaves brand names alone more often, which
+is sometimes better and sometimes not.
+
+Translation happens **during the scan**, not while drawing the review pane: a
+request per name on the interface thread would freeze the window. By review time
+the answers are in the database and the pane reads them without touching the
+network. A receipt scanned before the language was switched therefore keeps its
+English names until it is scanned again — a real limitation, and the honest
+trade for never blocking the interface.
+
+Sample of the output, from the real receipts: `Broccoli Crowns` → 西兰花冠,
+`Large Eggs` → 大鸡蛋, `Sourdough Loaf` → 酵母面包, `Clorox Plunger & Toilet
+Brush with Carry Caddy` → Clorox 柱塞和马桶刷，带携带盒. It is machine
+translation and reads like it: `24ct Paper Bowl` comes back as 24克拉纸碗,
+having taken "ct" for carats.
+
 ### Categorisation precedence
 
 Implemented in `app/categorize.py`, strongest first. The same list is printed on
@@ -458,7 +530,7 @@ values, so "no tip line" is distinguishable from "a tip of zero".
 ## 4. Data model
 
 SQLite, `data\bookkeeping.db`, schema in `app/db.py`. **`PRAGMA user_version` is
-at 5**; migrations live in `_migrate` and each is written to be a no-op on a
+at 6**; migrations live in `_migrate` and each is written to be a no-op on a
 database that already has the change, so they are safe to re-run. v2 removed the
 `GREAT VALUE` rule (§11.18), v3 added the abbreviation rules the offline engine
 needs, v4 added the `product_name` cache, and v5 added the grocery vocabulary
@@ -473,8 +545,9 @@ any pattern the user already has so a rule they deleted stays deleted.
 | `line_item` | purchased lines | description (+ `raw_description` = the model's plain-English expansion), sku, quantity, unit price, amount, category, `category_source`, `is_discount`, `taxable` |
 | `category` | expense categories | name (unique), colour chip, `is_builtin`, sort order |
 | `category_rule` | keyword rules | field (`description`/`merchant`), match type (`contains`/`regex`), pattern, category, priority (lower first), enabled |
+| `translation` | English name → Chinese | the machine translation cache; a `NULL` means the services were asked and had none |
 | `product_name` | barcode → readable name | the online lookup's cache: repaired UPC, name, which source knew it, when. A `NULL` name is a real answer ("asked, nobody knew"), not a gap — see §3 |
-| `setting` | key/value settings | engine preference, API key, model, effort, Tesseract path, auto-confirm, online lookup, **plus the interface's own state**: theme, window geometry, last page |
+| `setting` | key/value settings | engine preference, API key, model, effort, Tesseract path, auto-confirm, online lookup, item translation, **plus the interface's own state**: language, theme, window geometry, last page |
 
 The interface state lives in the same database on purpose: a portable copy then
 carries its appearance along with its books, and there is no second config file
@@ -512,7 +585,9 @@ app/extract/            recognition engines behind one interface
 app/lookup/             plain-English product names from a barcode (online)
     upc.py              the check-digit repair a Walmart receipt needs
     product_names.py    Open Food Facts + UPCitemdb, paced and time-boxed
+    translate.py        item names into Chinese, cached (Google, then MyMemory)
     __init__.py         the SQLite cache, and the entry point the pipeline calls
+app/i18n.py             interface language: English or Chinese
 app/categorize.py       the precedence chain
 app/validate.py         arithmetic checks → review flags
 app/db.py               schema and seed data
@@ -535,7 +610,8 @@ window packs and refreshes them and knows nothing else about them.
 
 ## 6. The interface
 
-One window, four pages, a menu bar (File / View / Help) and a status bar.
+One window, four pages, a menu bar (File / View / Help) and a status bar. The
+interface is in English or Chinese, chosen from **View → Language** (§3).
 Themes are chosen from **View → Theme**, which marks the active one; the
 *Theme* button in the header cycles through them.
 
@@ -892,6 +968,8 @@ when done, and check with
 | `app/lookup/product_names.py` | 282 | Open Food Facts + UPCitemdb, paced, time-boxed, failure-tolerant |
 | `app/lookup/__init__.py` | 130 | the barcode-name cache and the entry point the pipeline calls |
 | `app/lookup/upc.py` | 54 | UPC-A check digit; the repair a Walmart receipt needs |
+| `app/i18n.py` | 290 | interface language, the Chinese table, and the CJK font |
+| `app/lookup/translate.py` | 204 | item names into Chinese, cached; Google then MyMemory |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
 | `tools/verify_exe.py` | 218 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
@@ -903,6 +981,7 @@ when done, and check with
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
 | `tests/test_theme.py` | 160 | every palette's contrast and status-distinctness |
+| `tests/test_i18n.py` | 205 | the language switch, and machine translation of item names |
 | `tests/test_product_lookup.py` | 317 | barcode repair, both lookup sources, the cache, the rate-limit paths |
 | `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
@@ -919,7 +998,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 282 tests pass** (`pytest tests/ -q`, ~55 s):
+**Automated — 300 tests pass** (`pytest tests/ -q`, ~65 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -1189,7 +1268,7 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.8.1, for whoever reads this next:
+The state as of 1.9.0, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
@@ -1694,6 +1773,36 @@ The state as of 1.8.1, for whoever reads this next:
       desktop". Declaring `restype` and `argtypes` is not tidiness here; it is
       the difference between working and not.
 
+37. **Do not add a third interface language.** The user asked for Chinese and
+    said explicitly that nothing else should be added. `tests/test_i18n.py`
+    asserts the set of languages is exactly `{en, zh}` so that adding one is a
+    deliberate act rather than a drive-by; the cost is not the machinery but the
+    200-odd strings somebody then has to keep correct for ever.
+
+38. **A widget's own text cannot be the key it is looked up by.** The engine
+    picker and the receipt status filter stored their English label in the
+    combobox and then did `dict(ENGINES)[combobox.get()]`. In Chinese the
+    combobox returns Chinese and the lookup finds nothing. `_value_for` and
+    `_statuses_for` match on the *translated* label and hand back the English
+    code, so the value written to the database is the same in either language —
+    which everything else in the program depends on. Module-level tables that
+    hold display text are the ones to check when adding to the interface: they
+    are built at import, before a language is chosen.
+
+39. **The Google Translate endpoint every snippet uses is blocked here.**
+    `translate.googleapis.com/translate_a/single` answers `429 Too Many
+    Requests` to the *first* request from this address — not after a burst, so
+    pacing cannot help and retrying is wasted time. The endpoint Google's own
+    Chrome extension uses,
+    `clients5.google.com/translate_a/t?client=dict-chrome-ex`, works: twelve
+    consecutive names at 0.5 s apart, no refusals. MyMemory is the fallback.
+
+    The trap underneath is the same one as 11.28: **a refusal is not a missing
+    translation.** Caching a 429 as "this name has no Chinese" would leave the
+    item in English for ever, and the cache would look exactly like one holding
+    a real answer. Only a service that actually replied may be recorded
+    (`app/lookup/translate.py`, `tests/test_i18n.py`).
+
 ---
 
 ## 12. Version control
@@ -1781,6 +1890,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.9.0 | 2026-08-31 | **The interface, and the receipts, in Chinese.** View → Language switches the whole interface between English and Chinese, and the item names read off a receipt are machine-translated to match. The English text is the translation key, so the source still reads as prose and a missing entry falls back to English rather than showing a bare key; a test compares every key against the string constants the code actually contains, so editing an English string cannot silently orphan its translation. Chinese only, asserted by a test (§11.37). Three things that had to be got right: a combobox hands back the text on screen, so settings looked up by their English label broke (§11.38); Segoe UI has no Chinese glyphs, so the font family follows the language; and switching language rebuilds every widget, exactly as switching theme does. Item names are translated during the scan and cached in a `translation` table (schema v6), never while drawing the review pane — a network request on the interface thread would freeze the window. The Google endpoint every snippet on the internet uses is blocked from this address on the very first request; the one its Chrome extension uses works (§11.39). 300 tests. |
 | 1.8.1 | 2026-08-31 | **A refusal stops looking like a crash.** The single-instance guard announced itself with a red error icon and wrote an ERROR line to the log for something that had gone right, and `verify_exe.py` proved that guard by flashing the dialog across the real desktop during every build — which the user reasonably took for a fault. The message now uses an information icon and logs at INFO, the `--allow-second-window` hint moved from the dialog into the log, and the verification runs the duplicate on a private Windows desktop, confirming the refusal from the log and the exit code instead of a window title (§11.36). No behaviour under test was suppressed. 282 tests. |
 | 1.8.0 | 2026-08-31 | **Every receipt is now read twice.** With no API key and no paid services on the table, the remaining accuracy had to come from what is already installed — so Windows OCR runs over each image at the stored size *and* shrunk to a 1176-pixel long edge, and the two readings are combined. Neither size wins outright: full size is better at the summary block, the reduced size is better at line items (§3). The one judgement — which set of line items to keep — is made by the receipt itself, whichever list lands closer to the printed subtotal, so a pass that invents lines is rejected by its own arithmetic. Measured through the real pipeline with the second pass off and on: summary figures found 14 of 18 → **16 of 18**, money the line items could not account for **$44.02 → $28.43**, line items found 66 → 70, and no receipt worse on any measure. Cost is about two tenths of a second. This supersedes the 1.5.2 decision to revert downscaling: replacing the full-size read was wrong, adding to it is right (11.32). |
 | 1.7.0 | 2026-08-31 | **Categorisation learns the language of shopping, and a controlled test of photo quality.** The user re-photographed one Aldi receipt flat and evenly lit, which answered a question the project could not answer for itself: the identical receipt went from 11 of 18 line items to **17 of 18**, with the missing $4.58 being exactly the remaining shortfall. Photograph quality is the largest single lever on accuracy and it belongs to the user, not the code (section 9). What it did not fix was the item *names* — 3 of 18 either way — so the rules had to be made noise-tolerant instead. Schema v5 seeds 63 more keyword rules: fresh produce, chilled and pantry staples, meat and fish, disposables, and merchant defaults for the supermarkets near these receipts. Categorisation on the two Aldi receipts went from **1 of 18 to 24 of 24**, and Walmart improved from 12 of 20 to 15 of 20 as a side effect. Choosing those patterns re-applied 11.22's substring trap, which bites harder on ordinary words than on brands: EGGS and not EGG because of LEGGINGS, BEANS and not BEAN because of BEANIE, and RICE, HAM, OATS and CREAM all rejected outright (11.35). 282 tests. |

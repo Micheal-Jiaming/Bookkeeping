@@ -20,11 +20,13 @@ from typing import Iterable
 
 from ..db import connect
 from .product_names import Found, resolve_many
+from .translate import chinese_for
 from .upc import barcode_for, check_digit, is_valid
 
 __all__ = [
     "Found",
     "barcode_for",
+    "chinese_for",
     "check_digit",
     "is_valid",
     "names_for_skus",

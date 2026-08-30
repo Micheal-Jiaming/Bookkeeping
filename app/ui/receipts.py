@@ -16,7 +16,8 @@ import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .. import pipeline, store
+from .. import i18n, lookup, pipeline, store
+from ..i18n import t
 from ..money import from_cents, to_cents
 from .theme import Button, Card, Pill, ScrollFrame, entry, field_label
 
@@ -43,6 +44,38 @@ STATUS_TONE = {
 IMAGE_MAX = (260, 320)
 
 
+def _chinese_names(items: list[dict]) -> dict[str, str]:
+    """Chinese for this receipt's item names, from the cache only.
+
+    Never goes to the network: the pane is drawn on the interface thread and a
+    translation request there would freeze the window. The scan fills the cache
+    (``pipeline._translate_item_names``), so by review time the answers are
+    already here. A receipt scanned before the language was switched simply has
+    none, and shows its English name.
+    """
+    if i18n.current() != "zh":
+        return {}
+    names = [(i.get("raw_description") or i.get("description") or "").strip()
+             for i in items]
+    try:
+        return lookup.chinese_for([n for n in names if n], enabled=False)
+    except Exception:
+        log.exception("Could not read cached translations")
+        return {}
+
+
+def _statuses_for(shown: str) -> tuple[str, ...] | None:
+    """The statuses behind the filter label the user picked.
+
+    The combobox hands back whatever text is on screen, which is Chinese when
+    the interface is, so the filter cannot be looked up by its English key.
+    """
+    for label, statuses in STATUS_FILTERS:
+        if t(label) == shown:
+            return statuses
+    return None
+
+
 class ReceiptsPage:
     def __init__(self, parent: tk.Misc, win) -> None:
         self.win = win
@@ -59,23 +92,23 @@ class ReceiptsPage:
         bar = tk.Frame(self.frame, bg=theme["BG"])
         bar.pack(fill="x", padx=12, pady=(12, 8))
 
-        Button(bar, theme, "＋ Add receipt images", self.win.add_images,
+        Button(bar, theme, t("＋ Add receipt images"), self.win.add_images,
                kind="primary", on=theme["BG"]).pack(side="left")
-        Button(bar, theme, "Paste image", self.win.paste_image,
+        Button(bar, theme, t("Paste image"), self.win.paste_image,
                on=theme["BG"]).pack(side="left", padx=6)
-        Button(bar, theme, "Add by hand", self.win.add_manual,
+        Button(bar, theme, t("Add by hand"), self.win.add_manual,
                on=theme["BG"]).pack(side="left")
 
-        tk.Label(bar, text="Show", bg=theme["BG"], fg=theme["MUTED"],
+        tk.Label(bar, text=t("Show"), bg=theme["BG"], fg=theme["MUTED"],
                  font=theme.font(9)).pack(side="left", padx=(18, 4))
-        self.status_choice = tk.StringVar(value=STATUS_FILTERS[0][0])
+        self.status_choice = tk.StringVar(value=t(STATUS_FILTERS[0][0]))
         status_box = ttk.Combobox(bar, textvariable=self.status_choice, width=13,
                                   state="readonly",
-                                  values=[label for label, _ in STATUS_FILTERS])
+                                  values=[t(label) for label, _ in STATUS_FILTERS])
         status_box.pack(side="left")
         status_box.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
 
-        tk.Label(bar, text="Search", bg=theme["BG"], fg=theme["MUTED"],
+        tk.Label(bar, text=t("Search"), bg=theme["BG"], fg=theme["MUTED"],
                  font=theme.font(9)).pack(side="left", padx=(14, 4))
         self.search = entry(bar, theme, width=26)
         self.search.pack(side="left")
@@ -93,9 +126,9 @@ class ReceiptsPage:
                                  selectmode="browse")
         # Widths are design pixels: a Treeview column does not scale itself, so
         # on a 150% display these must be scaled or every column truncates.
-        headings = (("date", "Date", 84), ("merchant", "Merchant", 130),
-                    ("category", "Category", 96), ("items", "Items", 44),
-                    ("total", "Total", 68), ("status", "Status", 88))
+        headings = (("date", t("Date"), 84), ("merchant", t("Merchant"), 130),
+                    ("category", t("Category"), 96), ("items", t("Items"), 44),
+                    ("total", t("Total"), 68), ("status", t("Status"), 88))
         for key, label, width in headings:
             self.tree.heading(key, text=label)
             anchor = "e" if key in ("items", "total") else "w"
@@ -113,8 +146,8 @@ class ReceiptsPage:
 
         self.empty = tk.Label(
             list_card, bg=theme["CARD"], fg=theme["DIM"], font=theme.font(10),
-            text="No receipts yet.\n\nUse “Add receipt images” to scan one,\n"
-                 "or “Add by hand” to type one in.", justify="center")
+            text=t("No receipts yet.\n\nUse “Add receipt images” to scan one,\n"
+                 "or “Add by hand” to type one in."), justify="center")
 
         self.review = ReviewPane(split, self)
         split.add(self.review.frame, weight=5)
@@ -130,7 +163,7 @@ class ReceiptsPage:
         wanted = select if select is not None else (
             self.selected if keep_selection or self.selected else None
         )
-        statuses = dict(STATUS_FILTERS)[self.status_choice.get()]
+        statuses = _statuses_for(self.status_choice.get())
         query = self.search.get().strip() or None
         _total, rows = store.list_receipts(statuses=statuses, query=query)
 
@@ -145,10 +178,10 @@ class ReceiptsPage:
                 values=(
                     row["purchased_at"] or "—",
                     row["merchant"] or row["original_name"] or "(unread)",
-                    row["category_name"] or "—",
+                    t(row["category_name"]) if row["category_name"] else "—",
                     row["item_count"] or 0,
                     from_cents(row["total_cents"]) or "—",
-                    STATUS_LABEL.get(row["status"], row["status"]),
+                    t(STATUS_LABEL.get(row["status"], row["status"])),
                 ))
             self._row_ids.append(row["id"])
 
@@ -200,7 +233,7 @@ class ReviewPane:
 
         head = tk.Frame(self.frame, bg=theme["CARD"])
         head.pack(fill="x", padx=14, pady=(12, 0))
-        self.title = tk.Label(head, text="No receipt selected", bg=theme["CARD"],
+        self.title = tk.Label(head, text=t("No receipt selected"), bg=theme["CARD"],
                               fg=theme["FG"], font=theme.font(12, "bold"), anchor="w")
         self.title.pack(side="left")
         self.status_pill = Pill(head, theme, "")
@@ -220,11 +253,11 @@ class ReviewPane:
         self.actions.pack(fill="x", padx=14, pady=(0, 12))
         self.buttons: dict[str, tk.Button] = {}
         for key, label, kind, command in (
-            ("confirm", "Save & confirm", "primary", self.save_and_confirm),
-            ("save", "Save draft", "ghost", self.save_draft),
-            ("rescan", "Re-scan", "ghost", self.rescan),
-            ("raw", "Output", "ghost", self.toggle_raw),
-            ("delete", "Delete", "danger", self.delete),
+            ("confirm", t("Save & confirm"), "primary", self.save_and_confirm),
+            ("save", t("Save draft"), "ghost", self.save_draft),
+            ("rescan", t("Re-scan"), "ghost", self.rescan),
+            ("raw", t("Output"), "ghost", self.toggle_raw),
+            ("delete", t("Delete"), "danger", self.delete),
         ):
             button = Button(self.actions, theme, label, command, kind=kind)
             button.pack(side="right" if key == "delete" else "left", padx=(0, 6))
@@ -239,9 +272,9 @@ class ReviewPane:
 
     def clear(self) -> None:
         self.receipt = None
-        self.title.configure(text="No receipt selected")
+        self.title.configure(text=t("No receipt selected"))
         self.status_pill.set("")
-        self.meta.configure(text="Choose a receipt on the left, or add one.")
+        self.meta.configure(text=t("Choose a receipt on the left, or add one."))
         for child in self.flags.winfo_children():
             child.destroy()
         self.scroll.clear()
@@ -271,7 +304,7 @@ class ReviewPane:
         scanning = receipt["status"] in ("scanning", "uploaded")
 
         self.title.configure(text=f"Receipt #{receipt['id']}")
-        self.status_pill.set(STATUS_LABEL.get(receipt["status"], receipt["status"]),
+        self.status_pill.set(t(STATUS_LABEL.get(receipt["status"], receipt["status"])),
                              STATUS_TONE.get(receipt["status"], "muted"))
         self.meta.configure(text=self._meta_text(receipt))
 
@@ -313,7 +346,7 @@ class ReviewPane:
             bits.append(f"${receipt['cost_usd']:.4f}")
         if receipt["input_tokens"]:
             bits.append(f"{receipt['input_tokens']}+{receipt['output_tokens']} tokens")
-        return "  ·  ".join(bits) or "not scanned"
+        return "  ·  ".join(bits) or t("not scanned")
 
     def _flag(self, message: str, bad: bool = False) -> None:
         theme = self.theme
@@ -334,7 +367,7 @@ class ReviewPane:
         holder.pack(side="left", anchor="n", padx=(0, 16))
         path = store.image_path(receipt["id"])
         if path is None:
-            tk.Label(holder, text="No image\n(entered by hand)", bg=theme["CARD_ALT"],
+            tk.Label(holder, text=t("No image\n(entered by hand)"), bg=theme["CARD_ALT"],
                      fg=theme["DIM"], font=theme.font(9), width=24, height=8,
                      justify="center").pack()
             return
@@ -348,14 +381,14 @@ class ReviewPane:
             self._photo = ImageTk.PhotoImage(image)
         except Exception as exc:
             log.warning("Could not show the image for receipt %s: %s", receipt["id"], exc)
-            tk.Label(holder, text="Image could not be shown", bg=theme["CARD_ALT"],
+            tk.Label(holder, text=t("Image could not be shown"), bg=theme["CARD_ALT"],
                      fg=theme["BAD"], font=theme.font(9)).pack()
             return
         label = tk.Label(holder, image=self._photo, bg=theme["CARD"], cursor="hand2",
                          highlightthickness=1, highlightbackground=theme["GRID"])
         label.pack()
         label.bind("<Button-1>", lambda _e: self.open_image())
-        tk.Label(holder, text="click to open full size", bg=theme["CARD"],
+        tk.Label(holder, text=t("click to open full size"), bg=theme["CARD"],
                  fg=theme["DIM"], font=theme.font(8)).pack(pady=(3, 0))
 
     def _build_fields(self, parent: tk.Frame, receipt: dict) -> None:
@@ -376,24 +409,24 @@ class ReviewPane:
                 box.bind("<KeyRelease>", lambda _e: self._update_sum())
             self.vars[key] = variable
 
-        text_field(0, 0, "merchant", "Merchant", receipt["merchant"] or "", 22)
-        text_field(0, 1, "purchased_at", "Date (YYYY-MM-DD)", receipt["purchased_at"] or "")
-        text_field(1, 0, "payment_method", "Payment", receipt["payment_method"] or "", 22)
-        text_field(1, 1, "currency", "Currency", receipt["currency"] or "USD", 8)
-        text_field(2, 0, "subtotal", "Subtotal", from_cents(receipt["subtotal_cents"]), 12)
-        text_field(2, 1, "tax", "Tax", from_cents(receipt["tax_cents"]), 12)
-        text_field(3, 0, "tip", "Tip", from_cents(receipt["tip_cents"]), 12)
-        text_field(3, 1, "total", "Total", from_cents(receipt["total_cents"]), 12)
+        text_field(0, 0, "merchant", t("Merchant"), receipt["merchant"] or "", 22)
+        text_field(0, 1, "purchased_at", t("Date (YYYY-MM-DD)"), receipt["purchased_at"] or "")
+        text_field(1, 0, "payment_method", t("Payment"), receipt["payment_method"] or "", 22)
+        text_field(1, 1, "currency", t("Currency"), receipt["currency"] or "USD", 8)
+        text_field(2, 0, "subtotal", t("Subtotal"), from_cents(receipt["subtotal_cents"]), 12)
+        text_field(2, 1, "tax", t("Tax"), from_cents(receipt["tax_cents"]), 12)
+        text_field(3, 0, "tip", t("Tip"), from_cents(receipt["tip_cents"]), 12)
+        text_field(3, 1, "total", t("Total"), from_cents(receipt["total_cents"]), 12)
 
         cell = tk.Frame(grid, bg=theme["CARD"])
         cell.grid(row=4, column=0, columnspan=2, sticky="ew", pady=3)
-        field_label(cell, theme, "Category for the whole receipt").pack(fill="x")
+        field_label(cell, theme, t("Category for the whole receipt")).pack(fill="x")
         self.category_box = self._category_combo(cell, receipt["category_id"])
         self.category_box.pack(fill="x")
 
         cell = tk.Frame(grid, bg=theme["CARD"])
         cell.grid(row=5, column=0, columnspan=2, sticky="ew", pady=3)
-        field_label(cell, theme, "Notes").pack(fill="x")
+        field_label(cell, theme, t("Notes")).pack(fill="x")
         self.notes = tk.Text(cell, height=2, bg=theme["ENTRY"], fg=theme["FG"],
                              insertbackground=theme["FG"], relief="flat",
                              highlightthickness=1, highlightbackground=theme["AXIS"],
@@ -405,11 +438,13 @@ class ReviewPane:
         grid.columnconfigure(1, weight=1)
 
     def _category_combo(self, parent: tk.Misc, category_id: int | None) -> ttk.Combobox:
-        names = ["—"] + [category["name"] for category in self._categories]
+        # Displayed translated, stored English -- see 11.38. A category the
+        # user made themselves has no translation and shows as it is.
+        names = ["—"] + [t(category["name"]) for category in self._categories]
         current = "—"
         for category in self._categories:
             if category["id"] == category_id:
-                current = category["name"]
+                current = t(category["name"])
         box = ttk.Combobox(parent, values=names, state="readonly", width=18)
         box.set(current)
         return box
@@ -417,7 +452,7 @@ class ReviewPane:
     def _category_id(self, box: ttk.Combobox) -> int | None:
         chosen = box.get()
         for category in self._categories:
-            if category["name"] == chosen:
+            if t(category["name"]) == chosen:
                 return category["id"]
         return None
 
@@ -428,19 +463,20 @@ class ReviewPane:
 
         header = tk.Frame(block, bg=theme["CARD"])
         header.pack(fill="x")
-        tk.Label(header, text="Line items", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(header, text=t("Line items"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(10, "bold")).pack(side="left")
-        Button(header, theme, "＋ Add line",
+        Button(header, theme, t("＋ Add line"),
                lambda: self._add_item_row(self.items_holder, {})).pack(side="right")
 
         titles = tk.Frame(block, bg=theme["CARD"])
         titles.pack(fill="x", pady=(6, 2))
-        for text, width in (("Item", 30), ("Qty", 5), ("Amount", 9), ("Category", 18)):
+        for text, width in ((t("Item"), 30), (t("Qty"), 5), (t("Amount"), 9), (t("Category"), 18)):
             tk.Label(titles, text=text, bg=theme["CARD"], fg=theme["MUTED"],
                      font=theme.font(8, "bold"), width=width, anchor="w").pack(side="left")
 
         self.items_holder = tk.Frame(block, bg=theme["CARD"])
         self.items_holder.pack(fill="both", expand=True)
+        self._zh = _chinese_names(receipt["items"])
         for item in receipt["items"]:
             self._add_item_row(self.items_holder, item)
 
@@ -480,8 +516,15 @@ class ReviewPane:
         # receipt came back as an Audi cylinder head gasket. Saying where the
         # name came from lets a reviewer weigh it instead of trusting it.
         readable = (item.get("raw_description") or "").strip()
-        if readable:
-            tk.Label(row, text=f"from barcode: {readable}", bg=theme["CARD"],
+        chinese = self._zh.get(readable or item.get("description", "").strip())
+        if chinese:
+            # In Chinese the translation is the useful line, so it replaces the
+            # English rather than adding a third. The printed name is still in
+            # the editable field above, which is the receipt's own word for it.
+            tk.Label(row, text=chinese, bg=theme["CARD"], fg=theme["DIM"],
+                     font=theme.font(8), anchor="w").pack(fill="x", padx=(6, 0))
+        elif readable:
+            tk.Label(row, text=t("from barcode: ") + readable, bg=theme["CARD"],
                      fg=theme["DIM"], font=theme.font(8),
                      anchor="w").pack(fill="x", padx=(6, 0))
 
@@ -511,13 +554,13 @@ class ReviewPane:
         for record in self._item_rows:
             total_cents += to_cents(record["amount"].get()) or 0
         header_total = to_cents(self.vars["total"].get()) if getattr(self, "vars", None) else None
-        text = f"Lines: {from_cents(total_cents)}"
+        text = t("Lines: ") + from_cents(total_cents)
         subtotal = to_cents(self.vars.get("subtotal").get()) if getattr(self, "vars", None) else None
         reference = subtotal if subtotal is not None else header_total
         if reference is not None:
             delta = total_cents - reference
             if abs(delta) > 5:
-                text += f"   (off by {from_cents(abs(delta))})"
+                text += t("   (off by ") + from_cents(abs(delta)) + ")"
         self.sum_label.configure(text=text)
 
     def _collect(self) -> store.ReceiptEdit:
@@ -568,11 +611,12 @@ class ReviewPane:
         try:
             store.save_receipt(receipt_id, self._collect(), confirm=confirm)
         except store.StoreError as exc:
-            messagebox.showerror("Bookkeeping", str(exc), parent=self.frame)
+            messagebox.showerror(t("Bookkeeping"), str(exc), parent=self.frame)
             return
         self.page.after_change(select=receipt_id)
         self.win.set_activity(
-            f"Receipt #{receipt_id} {'confirmed' if confirm else 'saved as a draft'}")
+            t("Receipt #") + str(receipt_id) + " "
+            + (t("confirmed") if confirm else t("saved as a draft")))
 
     def save_draft(self) -> None:
         self._save(confirm=False)
@@ -583,9 +627,9 @@ class ReviewPane:
         edit = self._collect()
         if edit.total_cents is None or not (edit.purchased_at or "").strip():
             messagebox.showwarning(
-                "Bookkeeping",
-                "A confirmed receipt needs at least a date and a total.\n\n"
-                "Fill those in (they are on the right of the image) and try again.",
+                t("Bookkeeping"),
+                t("A confirmed receipt needs at least a date and a total.\n\n"
+                "Fill those in (they are on the right of the image) and try again."),
                 parent=self.frame)
             return
         self._save(confirm=True)
@@ -595,10 +639,10 @@ class ReviewPane:
             return
         receipt_id = self.receipt["id"]
         if not pipeline.submit_scan(receipt_id):
-            messagebox.showinfo("Bookkeeping", "That receipt is already being read.",
+            messagebox.showinfo(t("Bookkeeping"), t("That receipt is already being read."),
                                 parent=self.frame)
             return
-        self.win.set_activity(f"Re-scanning receipt #{receipt_id}…")
+        self.win.set_activity(t("Re-scanning receipt #") + str(receipt_id) + "…")
         self.page.refresh(select=receipt_id)
         self.win._schedule_poll(immediate=True)
 
@@ -607,20 +651,21 @@ class ReviewPane:
             return
         receipt_id = self.receipt["id"]
         if not messagebox.askyesno(
-            "Bookkeeping",
-            f"Delete receipt #{receipt_id} and its image?\n\nThis cannot be undone.",
+            t("Bookkeeping"),
+            t("Delete receipt #") + str(receipt_id)
+            + t(" and its image?\n\nThis cannot be undone."),
             parent=self.frame,
         ):
             return
         try:
             store.delete_receipt(receipt_id)
         except store.StoreError as exc:
-            messagebox.showerror("Bookkeeping", str(exc), parent=self.frame)
+            messagebox.showerror(t("Bookkeeping"), str(exc), parent=self.frame)
             return
         self.clear()
         self.page.selected = None
         self.page.after_change()
-        self.win.set_activity(f"Receipt #{receipt_id} deleted")
+        self.win.set_activity(t("Receipt #") + str(receipt_id) + t(" deleted"))
 
     def open_image(self) -> None:
         if self.receipt is None:
@@ -632,7 +677,8 @@ class ReviewPane:
             if sys.platform == "win32":
                 os.startfile(str(path))  # noqa: S606 - the user's own image
         except OSError as exc:
-            messagebox.showerror("Bookkeeping", f"Could not open the image:\n{exc}",
+            messagebox.showerror(t("Bookkeeping"),
+                                 t("Could not open the image:\n") + str(exc),
                                  parent=self.frame)
 
     def toggle_raw(self) -> None:
@@ -641,7 +687,7 @@ class ReviewPane:
             return
         text = self.receipt["raw_response"] or self.receipt["raw_text"] or ""
         window = tk.Toplevel(self.frame)
-        window.title(f"Engine output — receipt #{self.receipt['id']}")
+        window.title(t("Engine output — receipt #") + str(self.receipt["id"]))
         window.configure(bg=self.theme["CARD"])
         window.geometry("640x520")
         box = tk.Text(window, bg=self.theme["ENTRY"], fg=self.theme["FG"],

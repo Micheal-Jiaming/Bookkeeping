@@ -21,6 +21,8 @@ from pathlib import Path
 from .. import paths, pipeline, settings_store, store
 from ..db import DATA_DIR, init_db
 from ..extract import engine_status
+from ..i18n import LANGUAGES, t
+from .. import i18n
 from .theme import THEME_LABELS, THEME_ORDER, Button, Pill, Theme, ui_scale
 
 log = logging.getLogger("bookkeeping.ui")
@@ -55,6 +57,9 @@ class MainWindow:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.version = version()
+        # Language first: every widget below reads its text through t(), and
+        # the theme picks its font family from the language.
+        i18n.set_language(settings_store.get("language", "en"))
         self.theme = Theme(settings_store.get("theme", "dark"), ui_scale(root))
         self.pages: dict[str, object] = {}
         self.current = settings_store.get("last_page", "receipts")
@@ -108,7 +113,7 @@ class MainWindow:
         nav.pack(side="left")
         for key, label in PAGES:
             button = tk.Button(
-                nav, text=label, command=lambda k=key: self.show(k),
+                nav, text=t(label), command=lambda k=key: self.show(k),
                 bg=c["CARD"], fg=c["MUTED"], activebackground=c["CARD_ALT"],
                 activeforeground=c["FG"], relief="flat", bd=0, padx=13, pady=7,
                 font=self.theme.font(10), cursor="hand2", highlightthickness=0,
@@ -118,9 +123,9 @@ class MainWindow:
 
         right = tk.Frame(self.header, bg=c["CARD"])
         right.pack(side="right", padx=12)
-        self.engine_pill = Pill(right, self.theme, "engine…")
+        self.engine_pill = Pill(right, self.theme, t("engine…"))
         self.engine_pill.pack(side="left", padx=(0, 8))
-        Button(right, self.theme, "Theme", self.cycle_theme).pack(side="left")
+        Button(right, self.theme, t("Theme"), self.cycle_theme).pack(side="left")
 
         self.body = tk.Frame(self.root, bg=c["BG"])
         self.body.pack(side="top", fill="both", expand=True)
@@ -143,21 +148,21 @@ class MainWindow:
         bar = tk.Menu(self.root, **menu_kwargs)
 
         file_menu = tk.Menu(bar, tearoff=0, **menu_kwargs)
-        file_menu.add_command(label="Add receipt images…   Ctrl+O",
+        file_menu.add_command(label=t("Add receipt images…   Ctrl+O"),
                               command=self.add_images)
-        file_menu.add_command(label="Paste image from clipboard   Ctrl+V",
+        file_menu.add_command(label=t("Paste image from clipboard   Ctrl+V"),
                               command=self.paste_image)
-        file_menu.add_command(label="Add receipt by hand   Ctrl+N",
+        file_menu.add_command(label=t("Add receipt by hand   Ctrl+N"),
                               command=self.add_manual)
         file_menu.add_separator()
-        file_menu.add_command(label="Export line items to CSV…", command=self.export_csv)
+        file_menu.add_command(label=t("Export line items to CSV…"), command=self.export_csv)
         file_menu.add_separator()
-        file_menu.add_command(label="Exit   Ctrl+Q", command=self.close)
-        bar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label=t("Exit   Ctrl+Q"), command=self.close)
+        bar.add_cascade(label=t("File"), menu=file_menu)
 
         view_menu = tk.Menu(bar, tearoff=0, **menu_kwargs)
         for index, (key, label) in enumerate(PAGES, start=1):
-            view_menu.add_command(label=f"{label}   Ctrl+{index}",
+            view_menu.add_command(label=f"{t(label)}   Ctrl+{index}",
                                   command=lambda k=key: self.show(k))
         view_menu.add_separator()
         # A submenu rather than the old "Switch light / dark" command: with four
@@ -168,19 +173,31 @@ class MainWindow:
         self._theme_choice = tk.StringVar(value=self.theme.name)
         for key in THEME_ORDER:
             theme_menu.add_radiobutton(
-                label=THEME_LABELS.get(key, key.title()), value=key,
+                label=t(THEME_LABELS.get(key, key.title())), value=key,
                 variable=self._theme_choice,
                 command=lambda k=key: self.set_theme(k))
-        view_menu.add_cascade(label="Theme", menu=theme_menu)
-        view_menu.add_command(label="Refresh   F5", command=self.refresh)
-        bar.add_cascade(label="View", menu=view_menu)
+        view_menu.add_cascade(label=t("Theme"), menu=theme_menu)
+
+        # Chinese only, deliberately -- see app/i18n.py. Each name is
+        # written in its own language, which is the one convention every
+        # language picker follows: somebody who cannot read the current
+        # interface can still find their way out of it.
+        language_menu = tk.Menu(view_menu, tearoff=0, **menu_kwargs)
+        self._language_choice = tk.StringVar(value=i18n.current())
+        for code, name in LANGUAGES.items():
+            language_menu.add_radiobutton(
+                label=name, value=code, variable=self._language_choice,
+                command=lambda c=code: self.set_language(c))
+        view_menu.add_cascade(label=t("Language"), menu=language_menu)
+        view_menu.add_command(label=t("Refresh   F5"), command=self.refresh)
+        bar.add_cascade(label=t("View"), menu=view_menu)
 
         help_menu = tk.Menu(bar, tearoff=0, **menu_kwargs)
-        help_menu.add_command(label="Open data folder", command=self.open_data_folder)
-        help_menu.add_command(label="Open log file", command=self.open_log)
+        help_menu.add_command(label=t("Open data folder"), command=self.open_data_folder)
+        help_menu.add_command(label=t("Open log file"), command=self.open_log)
         help_menu.add_separator()
         help_menu.add_command(label=f"About {APP_NAME}", command=self.about)
-        bar.add_cascade(label="Help", menu=help_menu)
+        bar.add_cascade(label=t("Help"), menu=help_menu)
 
         self.root.configure(menu=bar)
 
@@ -242,9 +259,9 @@ class MainWindow:
     def add_images(self) -> None:
         filenames = filedialog.askopenfilenames(
             parent=self.root,
-            title="Choose receipt images",
-            filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.gif *.bmp"),
-                       ("All files", "*.*")],
+            title=t("Choose receipt images"),
+            filetypes=[(t("Images"), "*.png *.jpg *.jpeg *.webp *.gif *.bmp"),
+                       (t("All files"), "*.*")],
         )
         if not filenames:
             return
@@ -272,8 +289,8 @@ class MainWindow:
         if grabbed is None:
             messagebox.showinfo(
                 APP_NAME,
-                "The clipboard has no image in it.\n\n"
-                "Copy a receipt photo or take a screenshot (Win+Shift+S) first.",
+                t("The clipboard has no image in it.\n\n"
+                "Copy a receipt photo or take a screenshot (Win+Shift+S) first."),
                 parent=self.root)
             return
         if isinstance(grabbed, list):  # a file was copied in Explorer, not an image
@@ -323,7 +340,7 @@ class MainWindow:
 
     def export_csv(self) -> None:
         destination = filedialog.asksaveasfilename(
-            parent=self.root, title="Export line items",
+            parent=self.root, title=t("Export line items"),
             defaultextension=".csv", initialfile="bookkeeping-items.csv",
             filetypes=[("CSV", "*.csv")],
         )
@@ -346,7 +363,7 @@ class MainWindow:
     def open_log(self) -> None:
         log_path = DATA_DIR / "bookkeeping.log"
         if not log_path.exists():
-            messagebox.showinfo(APP_NAME, "There is no log file yet.", parent=self.root)
+            messagebox.showinfo(APP_NAME, t("There is no log file yet."), parent=self.root)
             return
         self._reveal(log_path)
 
@@ -378,6 +395,18 @@ class MainWindow:
     def cycle_theme(self) -> None:
         index = THEME_ORDER.index(self.theme.name)
         self.set_theme(THEME_ORDER[(index + 1) % len(THEME_ORDER)])
+
+    def set_language(self, code: str) -> None:
+        """Switch the interface language and redraw everything in it.
+
+        The same full rebuild the theme switch uses: a Tk widget holds its text
+        as an instance option, so nothing short of building them again will
+        change it. The font family changes with the language too, because Segoe
+        UI has no Chinese glyphs.
+        """
+        settings_store.save({"language": code})
+        i18n.set_language(code)
+        self.set_theme(self.theme.name)
 
     def set_theme(self, name: str) -> None:
         settings_store.save({"theme": name})
@@ -443,13 +472,13 @@ class MainWindow:
         if ready:
             self.engine_pill.set(" + ".join(ready), "good")
         else:
-            self.engine_pill.set("no engine — see Settings", "bad")
+            self.engine_pill.set(t("no engine — see Settings"), "bad")
 
     # -------------------------------------------------------------- close --
 
     def close(self) -> None:
         if pipeline.busy() and not messagebox.askokcancel(
-            APP_NAME, "A receipt is still being read. Close anyway?",
+            APP_NAME, t("A receipt is still being read. Close anyway?"),
             parent=self.root
         ):
             return

@@ -15,6 +15,7 @@ from .. import settings_store
 from ..db import DATA_DIR
 from ..extract import engine_status
 from ..extract.claude_vision import PRICING
+from ..i18n import t
 from .theme import Button, Card, entry, field_label
 
 ENGINES = (
@@ -44,19 +45,19 @@ class SettingsPage:
 
         left = Card(columns, theme)
         left.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        tk.Label(left, text="Recognition", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(left, text=t("Recognition"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(11, "bold"), anchor="w").pack(fill="x", padx=16,
                                                                 pady=(14, 8))
         body = tk.Frame(left, bg=theme["CARD"])
         body.pack(fill="x", padx=16)
 
         self.engine = tk.StringVar()
-        holder = self._row(body, "Engine")
+        holder = self._row(body, t("Engine"))
         ttk.Combobox(holder, textvariable=self.engine, state="readonly", width=38,
-                     values=[label for label, _ in ENGINES]).pack(anchor="w")
+                     values=[t(label) for label, _ in ENGINES]).pack(anchor="w")
 
         self.api_key = tk.StringVar()
-        holder = self._row(body, "Anthropic API key")
+        holder = self._row(body, t("Anthropic API key"))
         self.key_entry = entry(holder, theme, width=40, textvariable=self.api_key,
                                show="•")
         self.key_entry.pack(anchor="w")
@@ -66,38 +67,39 @@ class SettingsPage:
         self.key_hint.pack(fill="x", pady=(0, 8))
 
         self.model = tk.StringVar()
-        holder = self._row(body, "Model")
+        holder = self._row(body, t("Model"))
         ttk.Combobox(holder, textvariable=self.model, width=38,
                      values=list(MODELS)).pack(anchor="w")
 
         self.effort = tk.StringVar()
-        holder = self._row(body, "Effort")
+        holder = self._row(body, t("Effort"))
         ttk.Combobox(holder, textvariable=self.effort, state="readonly", width=38,
                      values=list(EFFORTS)).pack(anchor="w")
 
         self.base_url = tk.StringVar()
-        holder = self._row(body, "Base URL (optional, for a proxy)")
+        holder = self._row(body, t("Base URL (optional, for a proxy)"))
         entry(holder, theme, width=40, textvariable=self.base_url).pack(anchor="w")
 
         self.ocr_language = tk.StringVar()
-        holder = self._row(body, "Offline OCR language")
+        holder = self._row(body, t("Offline OCR language"))
         ttk.Combobox(holder, textvariable=self.ocr_language, state="readonly",
-                     width=38, values=[AUTO_LANGUAGE, *_ocr_languages()]).pack(anchor="w")
+                     width=38,
+                     values=[t(AUTO_LANGUAGE), *_ocr_languages()]).pack(anchor="w")
 
         self.tesseract = tk.StringVar()
-        holder = self._row(body, "Tesseract executable (optional)")
+        holder = self._row(body, t("Tesseract executable (optional)"))
         inner = tk.Frame(holder, bg=theme["CARD"])
         inner.pack(fill="x")
         entry(inner, theme, width=34, textvariable=self.tesseract).pack(side="left")
-        Button(inner, theme, "Browse…", self._browse_tesseract).pack(side="left", padx=6)
+        Button(inner, theme, t("Browse…"), self._browse_tesseract).pack(side="left", padx=6)
 
         self.auto_confirm = tk.BooleanVar()
         check = ttk.Checkbutton(
             body, variable=self.auto_confirm,
-            text="Auto-confirm receipts that pass every arithmetic check")
+            text=t("Auto-confirm receipts that pass every arithmetic check"))
         check.pack(anchor="w", pady=(8, 0))
-        tk.Label(body, text="Off by default: a reading whose numbers add up can "
-                            "still have the wrong merchant or category.",
+        tk.Label(body, text=t("Off by default: a reading whose numbers add up can "
+                            "still have the wrong merchant or category."),
                  bg=theme["CARD"], fg=theme["DIM"], font=theme.font(8),
                  anchor="w", justify="left",
                  wraplength=theme.px(420)).pack(fill="x")
@@ -105,20 +107,31 @@ class SettingsPage:
         self.online_lookup = tk.BooleanVar()
         ttk.Checkbutton(
             body, variable=self.online_lookup,
-            text="Look product names up online").pack(anchor="w", pady=(8, 0))
-        tk.Label(body, text="Turns 'CLX PLNGR' into 'Clorox Plunger & Toilet "
+            text=t("Look product names up online")).pack(anchor="w", pady=(8, 0))
+        tk.Label(body, text=t("Turns 'CLX PLNGR' into 'Clorox Plunger & Toilet "
                             "Brush'. Sends only the barcode printed beside an "
                             "item — never the shop, the date or the price — to "
                             "Open Food Facts and UPCitemdb. Answers are cached, "
-                            "so a name is fetched once and then works offline.",
+                            "so a name is fetched once and then works offline."),
+                 bg=theme["CARD"], fg=theme["DIM"], font=theme.font(8),
+                 anchor="w", justify="left",
+                 wraplength=theme.px(420)).pack(fill="x")
+
+        self.translate_items = tk.BooleanVar()
+        ttk.Checkbutton(
+            body, variable=self.translate_items,
+            text=t("Translate item names into Chinese")).pack(anchor="w", pady=(8, 0))
+        tk.Label(body, text=t("Only used while the interface is in Chinese. Item "
+                            "names are translated as a receipt is scanned and "
+                            "kept, so the review pane never waits on the network."),
                  bg=theme["CARD"], fg=theme["DIM"], font=theme.font(8),
                  anchor="w", justify="left",
                  wraplength=theme.px(420)).pack(fill="x")
 
         buttons = tk.Frame(left, bg=theme["CARD"])
         buttons.pack(fill="x", padx=16, pady=14)
-        Button(buttons, theme, "Save settings", self.save, kind="primary").pack(side="left")
-        Button(buttons, theme, "Clear stored key", self.clear_key,
+        Button(buttons, theme, t("Save settings"), self.save, kind="primary").pack(side="left")
+        Button(buttons, theme, t("Clear stored key"), self.clear_key,
                kind="danger").pack(side="left", padx=6)
         self.saved = tk.Label(buttons, text="", bg=theme["CARD"], fg=theme["GOOD"],
                               font=theme.font(9))
@@ -129,7 +142,7 @@ class SettingsPage:
 
         status_card = Card(right, theme)
         status_card.pack(fill="x")
-        tk.Label(status_card, text="Engine status", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(status_card, text=t("Engine status"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(11, "bold"), anchor="w").pack(fill="x", padx=16,
                                                                 pady=(14, 6))
         self.status_body = tk.Frame(status_card, bg=theme["CARD"])
@@ -137,7 +150,7 @@ class SettingsPage:
 
         cost_card = Card(right, theme)
         cost_card.pack(fill="x", pady=(10, 0))
-        tk.Label(cost_card, text="What a scan costs", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(cost_card, text=t("What a scan costs"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(11, "bold"), anchor="w").pack(fill="x", padx=16,
                                                                 pady=(14, 6))
         tk.Label(cost_card, text=_cost_text(), bg=theme["CARD"], fg=theme["MUTED"],
@@ -146,7 +159,7 @@ class SettingsPage:
 
         about_card = Card(right, theme)
         about_card.pack(fill="both", expand=True, pady=(10, 0))
-        tk.Label(about_card, text="This computer", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(about_card, text=t("This computer"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(11, "bold"), anchor="w").pack(fill="x", padx=16,
                                                                 pady=(14, 6))
         self.about = tk.Label(about_card, text="", bg=theme["CARD"], fg=theme["MUTED"],
@@ -155,9 +168,9 @@ class SettingsPage:
         self.about.pack(fill="x", padx=16)
         folder_row = tk.Frame(about_card, bg=theme["CARD"])
         folder_row.pack(fill="x", padx=16, pady=14)
-        Button(folder_row, theme, "Open data folder",
+        Button(folder_row, theme, t("Open data folder"),
                self.win.open_data_folder).pack(side="left")
-        Button(folder_row, theme, "Open log file",
+        Button(folder_row, theme, t("Open log file"),
                self.win.open_log).pack(side="left", padx=6)
 
     def _row(self, parent: tk.Frame, label: str) -> tk.Frame:
@@ -180,18 +193,19 @@ class SettingsPage:
         self.model.set(values.get("model", "claude-opus-5"))
         self.effort.set(values.get("effort", "medium"))
         self.base_url.set(values.get("anthropic_base_url", ""))
-        self.ocr_language.set(values.get("ocr_language", "") or AUTO_LANGUAGE)
+        self.ocr_language.set(values.get("ocr_language", "") or t(AUTO_LANGUAGE))
         self.tesseract.set(values.get("tesseract_cmd", ""))
         self.auto_confirm.set(values.get("auto_confirm_clean", "0") == "1")
         self.online_lookup.set(values.get("online_lookup", "1") == "1")
+        self.translate_items.set(values.get("translate_items", "1") == "1")
         self.api_key.set("")
         masked = values.get("anthropic_api_key") or ""
         self.key_hint.configure(
             text=(f"Stored key: {masked}. Leave this box empty to keep it."
                   if masked else
-                  "No key stored yet. Paste one from console.anthropic.com; it is "
+                  t("No key stored yet. Paste one from console.anthropic.com; it is "
                   "kept in this copy's own data folder and never sent anywhere "
-                  "except to Anthropic.")
+                  "except to Anthropic."))
         )
 
         for child in self.status_body.winfo_children():
@@ -222,22 +236,23 @@ class SettingsPage:
 
     def _browse_tesseract(self) -> None:
         chosen = filedialog.askopenfilename(
-            parent=self.frame, title="Find tesseract.exe",
-            filetypes=[("Programs", "*.exe"), ("All files", "*.*")])
+            parent=self.frame, title=t("Find tesseract.exe"),
+            filetypes=[(t("Programs"), "*.exe"), (t("All files"), "*.*")])
         if chosen:
             self.tesseract.set(chosen)
 
     def save(self) -> None:
         updates = {
-            "engine": dict(ENGINES)[self.engine.get()],
+            "engine": _value_for(ENGINES, self.engine.get()),
             "model": self.model.get().strip() or "claude-opus-5",
             "effort": self.effort.get() if self.effort.get() in EFFORTS else "medium",
             "anthropic_base_url": self.base_url.get().strip(),
-            "ocr_language": "" if self.ocr_language.get() == AUTO_LANGUAGE
+            "ocr_language": "" if self.ocr_language.get() == t(AUTO_LANGUAGE)
                             else self.ocr_language.get().strip(),
             "tesseract_cmd": self.tesseract.get().strip(),
             "auto_confirm_clean": "1" if self.auto_confirm.get() else "0",
             "online_lookup": "1" if self.online_lookup.get() else "0",
+            "translate_items": "1" if self.translate_items.get() else "0",
         }
         typed = self.api_key.get().strip()
         if typed:
@@ -245,14 +260,14 @@ class SettingsPage:
         settings_store.save(updates)
         self.refresh()
         self.win.update_engine_pill()
-        self.saved.configure(text="Saved.")
+        self.saved.configure(text=t("Saved."))
         self.frame.after(2500, lambda: self.saved.configure(text=""))
 
     def clear_key(self) -> None:
         if not messagebox.askyesno(
-            "Bookkeeping",
-            "Remove the stored API key?\n\nScanning with Claude will stop working "
-            "until a key is entered again.",
+            t("Bookkeeping"),
+            t("Remove the stored API key?\n\nScanning with Claude will stop working "
+            "until a key is entered again."),
             parent=self.frame,
         ):
             return
@@ -262,10 +277,25 @@ class SettingsPage:
 
 
 def _label_for(choices: tuple[tuple[str, str], ...], value: str) -> str:
+    """The translated label a stored code should show as."""
     for label, key in choices:
         if key == value:
-            return label
-    return choices[0][0]
+            return t(label)
+    return t(choices[0][0])
+
+
+def _value_for(choices: tuple[tuple[str, str], ...], shown: str) -> str:
+    """The code behind a label the user picked.
+
+    A combobox hands back whatever text is on screen, which is Chinese when the
+    interface is in Chinese -- so the settings cannot be looked up by the
+    English key. Matching on the translated label keeps the stored value in
+    English either way, which is what everything else in the program expects.
+    """
+    for label, key in choices:
+        if t(label) == shown:
+            return key
+    return choices[0][1]
 
 
 def _ocr_languages() -> list[str]:
@@ -290,8 +320,8 @@ def _cost_text() -> str:
     Both shapes are shown because they differ by more than 2x: the reply grows
     with the number of line items, and a full weekly shop is not a coffee.
     """
-    lines = ["Per receipt, at list prices — a short receipt (a few items) and a "
-             "long one (a 24-line shop, measured):"]
+    lines = [t("Per receipt, at list prices — a short receipt (a few items) and a "
+             "long one (a 24-line shop, measured):")]
     for model in MODELS:
         rates = PRICING.get(model)
         if not rates:
@@ -299,6 +329,6 @@ def _cost_text() -> str:
         small = 1600 / 1e6 * rates[0] + 400 / 1e6 * rates[1]
         large = 2208 / 1e6 * rates[0] + 1487 / 1e6 * rates[1]
         lines.append(f"   {model}:  ${small:.4f} – ${large:.4f}")
-    lines.append("\nEvery scan records what it actually cost; it is shown beside "
-                 "the receipt in the review pane.")
+    lines.append(t("\nEvery scan records what it actually cost; it is shown beside "
+                 "the receipt in the review pane."))
     return "\n".join(lines)

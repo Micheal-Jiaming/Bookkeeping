@@ -15,6 +15,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from .. import store
+from ..i18n import t
 from .theme import Button, Card, entry, field_label
 
 FIELD_CHOICES = (("Item name contains", "description"), ("Merchant contains", "merchant"))
@@ -37,66 +38,66 @@ class RulesPage:
         # ---------------------------------------------------- categories --
         left = Card(columns, theme)
         left.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        tk.Label(left, text="Categories", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(left, text=t("Categories"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(11, "bold"), anchor="w").pack(fill="x", padx=14,
                                                                pady=(12, 2))
-        tk.Label(left, text="The buckets the reports are built from. These names are "
-                            "also the choices offered to the recognition model.",
+        tk.Label(left, text=t("The buckets the reports are built from. These names are "
+                            "also the choices offered to the recognition model."),
                  bg=theme["CARD"], fg=theme["MUTED"], font=theme.font(9),
                  anchor="w", justify="left",
                  wraplength=theme.px(380)).pack(fill="x", padx=14)
 
         self.category_tree = ttk.Treeview(left, columns=("name", "lines"),
                                           show="headings", selectmode="browse")
-        self.category_tree.heading("name", text="Name")
-        self.category_tree.heading("lines", text="Lines")
+        self.category_tree.heading("name", text=t("Name"))
+        self.category_tree.heading("lines", text=t("Lines"))
         self.category_tree.column("name", width=200, anchor="w")
         self.category_tree.column("lines", width=60, anchor="e")
         self.category_tree.pack(fill="both", expand=True, padx=8, pady=8)
 
         form = tk.Frame(left, bg=theme["CARD"])
         form.pack(fill="x", padx=14, pady=(0, 12))
-        field_label(form, theme, "New category").pack(anchor="w")
+        field_label(form, theme, t("New category")).pack(anchor="w")
         row = tk.Frame(form, bg=theme["CARD"])
         row.pack(fill="x")
         self.category_name = tk.StringVar()
         entry(row, theme, width=22, textvariable=self.category_name).pack(side="left")
-        Button(row, theme, "Add", self.add_category,
+        Button(row, theme, t("Add"), self.add_category,
                kind="primary").pack(side="left", padx=6)
-        Button(row, theme, "Delete selected", self.delete_category,
+        Button(row, theme, t("Delete selected"), self.delete_category,
                kind="danger").pack(side="right")
 
         # --------------------------------------------------------- rules --
         right = Card(columns, theme)
         right.pack(side="left", fill="both", expand=True)
-        tk.Label(right, text="Keyword rules", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(right, text=t("Keyword rules"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(11, "bold"), anchor="w").pack(fill="x", padx=14,
                                                                 pady=(12, 2))
         tk.Label(
             right,
-            text="Order of precedence: what you set by hand wins, then item-name "
+            text=t("Order of precedence: what you set by hand wins, then item-name "
                  "rules, then the model's own suggestion, then merchant rules, "
                  "then Uncategorized. Merchant rules sit below the model on "
                  "purpose — “everything from this shop is Groceries” is a safety "
                  "net, not a better answer than a look at the item. Lower "
-                 "priority numbers run first.",
+                 "priority numbers run first."),
             bg=theme["CARD"], fg=theme["MUTED"], font=theme.font(9), anchor="w",
             justify="left", wraplength=theme.px(420)).pack(fill="x", padx=14)
 
         self.rule_tree = ttk.Treeview(
             right, columns=("priority", "field", "pattern", "category"),
             show="headings", selectmode="browse")
-        for key, label, width, anchor in (("priority", "Pri", 40, "e"),
-                                          ("field", "Matches", 80, "w"),
-                                          ("pattern", "Pattern", 170, "w"),
-                                          ("category", "Category", 120, "w")):
+        for key, label, width, anchor in (("priority", t("Pri"), 40, "e"),
+                                          ("field", t("Matches"), 80, "w"),
+                                          ("pattern", t("Pattern"), 170, "w"),
+                                          ("category", t("Category"), 120, "w")):
             self.rule_tree.heading(key, text=label)
             self.rule_tree.column(key, width=width, anchor=anchor)
         self.rule_tree.pack(fill="both", expand=True, padx=8, pady=8)
 
         form = tk.Frame(right, bg=theme["CARD"])
         form.pack(fill="x", padx=14, pady=(0, 12))
-        field_label(form, theme, "New rule").pack(anchor="w")
+        field_label(form, theme, t("New rule")).pack(anchor="w")
         row = tk.Frame(form, bg=theme["CARD"])
         row.pack(fill="x", pady=(0, 6))
         self.rule_field = tk.StringVar(value=FIELD_CHOICES[0][0])
@@ -118,14 +119,14 @@ class RulesPage:
         field_label(row2, theme, "priority").pack(side="left", padx=(8, 3))
         self.rule_priority = tk.StringVar(value="80")
         entry(row2, theme, width=5, textvariable=self.rule_priority).pack(side="left")
-        Button(row2, theme, "Add rule", self.add_rule,
+        Button(row2, theme, t("Add rule"), self.add_rule,
                kind="primary").pack(side="left", padx=6)
-        Button(row2, theme, "Delete selected", self.delete_rule,
+        Button(row2, theme, t("Delete selected"), self.delete_rule,
                kind="danger").pack(side="right")
 
         apply_row = tk.Frame(right, bg=theme["CARD"])
         apply_row.pack(fill="x", padx=14, pady=(0, 12))
-        Button(apply_row, theme, "Re-apply rules to unconfirmed receipts",
+        Button(apply_row, theme, t("Re-apply rules to unconfirmed receipts"),
                self.apply_rules).pack(side="left")
         self.apply_result = tk.Label(apply_row, text="", bg=theme["CARD"],
                                      fg=theme["MUTED"], font=theme.font(9))
@@ -150,7 +151,7 @@ class RulesPage:
             self.rule_tree.insert("", "end", iid=str(rule["id"]), values=(
                 rule["priority"],
                 "item" if rule["field"] == "description" else "merchant",
-                rule["pattern"] + ("  (regex)" if rule["match_type"] == "regex" else ""),
+                rule["pattern"] + (t("  (regex)") if rule["match_type"] == "regex" else ""),
                 rule["category_name"],
             ))
 
@@ -166,7 +167,7 @@ class RulesPage:
         try:
             store.create_category(self.category_name.get())
         except store.StoreError as exc:
-            messagebox.showerror("Bookkeeping", str(exc), parent=self.frame)
+            messagebox.showerror(t("Bookkeeping"), str(exc), parent=self.frame)
             return
         self.category_name.set("")
         self.refresh()
@@ -174,12 +175,12 @@ class RulesPage:
     def delete_category(self) -> None:
         chosen = self.category_tree.selection()
         if not chosen:
-            messagebox.showinfo("Bookkeeping", "Select a category to delete first.",
+            messagebox.showinfo(t("Bookkeeping"), t("Select a category to delete first."),
                                 parent=self.frame)
             return
         name = self.category_tree.item(chosen[0], "values")[0]
         if not messagebox.askyesno(
-            "Bookkeeping",
+            t("Bookkeeping"),
             f"Delete the category “{name}”?\n\n"
             "Any line items using it move to Uncategorized.",
             parent=self.frame,
@@ -188,20 +189,20 @@ class RulesPage:
         try:
             store.delete_category(int(chosen[0]))
         except store.StoreError as exc:
-            messagebox.showerror("Bookkeeping", str(exc), parent=self.frame)
+            messagebox.showerror(t("Bookkeeping"), str(exc), parent=self.frame)
             return
         self.refresh()
 
     def add_rule(self) -> None:
         category_id = self._category_id(self.rule_category.get())
         if category_id is None:
-            messagebox.showinfo("Bookkeeping", "Choose a category for the rule.",
+            messagebox.showinfo(t("Bookkeeping"), t("Choose a category for the rule."),
                                 parent=self.frame)
             return
         try:
             priority = int(self.rule_priority.get())
         except ValueError:
-            messagebox.showerror("Bookkeeping", "Priority must be a whole number.",
+            messagebox.showerror(t("Bookkeeping"), t("Priority must be a whole number."),
                                  parent=self.frame)
             return
         try:
@@ -212,23 +213,23 @@ class RulesPage:
                 priority=priority,
             )
         except store.StoreError as exc:
-            messagebox.showerror("Bookkeeping", str(exc), parent=self.frame)
+            messagebox.showerror(t("Bookkeeping"), str(exc), parent=self.frame)
             return
         self.rule_pattern.set("")
         self.refresh()
         self.apply_result.configure(
-            text="Added. Use “Re-apply rules” to backfill existing receipts.")
+            text=t("Added. Use “Re-apply rules” to backfill existing receipts."))
 
     def delete_rule(self) -> None:
         chosen = self.rule_tree.selection()
         if not chosen:
-            messagebox.showinfo("Bookkeeping", "Select a rule to delete first.",
+            messagebox.showinfo(t("Bookkeeping"), t("Select a rule to delete first."),
                                 parent=self.frame)
             return
         try:
             store.delete_rule(int(chosen[0]))
         except store.StoreError as exc:
-            messagebox.showerror("Bookkeeping", str(exc), parent=self.frame)
+            messagebox.showerror(t("Bookkeeping"), str(exc), parent=self.frame)
             return
         self.refresh()
 
