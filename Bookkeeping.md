@@ -998,7 +998,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 308 tests pass** (`pytest tests/ -q`, ~66 s):
+**Automated — 310 tests pass** (`pytest tests/ -q`, ~66 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -1268,7 +1268,7 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.9.3, for whoever reads this next:
+The state as of 1.9.4, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
@@ -1885,11 +1885,18 @@ The state as of 1.9.3, for whoever reads this next:
     explicitly, with the trade written down -- a genuine taxi fare line would be
     read as summary, which is acceptable for something that reads shop receipts.
 
-    This is the same substring trap as 11.22, in a different list. It is worth
-    stating as a rule: **any short word matched as a substring will eventually
-    match inside a real product name.** Both lists are now whole-word; a third
-    list of this kind should start that way (`app/extract/receipt_text.py`,
-    `tests/test_units.py`).
+    This is the same substring trap as 11.22, in a different list, and the fix
+    round walked straight into it a third time: `_PAYMENT_WORDS` was left on
+    substring matching, so `CHICKEN TENDERS` matched `TEND`, `CASHEWS` matched
+    `CASH` and `CARDAMOM` matched `CARD`. That one was not cosmetic either --
+    a payment line's amount disqualifies an unnamed item (11.45), so a real
+    `LOOSE PRODUCE 8.99` line disappeared because chicken tenders cost the same.
+    Both lists now go through `_whole_words()`.
+
+    Worth stating as a rule, since three lists have now had it: **any short word
+    matched as a substring will eventually match inside a real product name.** A
+    fourth list of this kind should use `_whole_words()` from the start
+    (`app/extract/receipt_text.py`, `tests/test_units.py`).
 
 45. **Only a payment line's amount may disqualify an item.** The rule that drops
     an unnamed line whose amount equals one the receipt declares (11.34) was
@@ -2007,6 +2014,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.9.4 | 2026-08-31 | **The fix round repeated the bug it was fixing.** The gate blocked a second time, correctly. `_SUMMARY_WORDS` had been converted to whole-word matching but `_PAYMENT_WORDS` had not, so `CHICKEN TENDERS` matched `TEND` — and because a payment line's amount disqualifies an unnamed item, a genuine `LOOSE PRODUCE 8.99` line vanished because the tenders cost the same. `CASHEWS` and `CARDAMOM` did it through `CASH` and `CARD`. Both lists now share `_whole_words()`. The comment claiming the trap was closed had also been orphaned onto the one list where it was still open — the same insertion-steals-a-comment fault as §11.47, in the commit that fixed §11.47. 310 tests, six photographs unchanged. |
 | 1.9.3 | 2026-08-31 | **What the quality gate caught.** The first push attempt was blocked, and the review was right to block it. Two comment blocks had been orphaned from the constants they explain by later insertions (§11.47), and two claims in `app/db.py` were false — one said all the new rules are priority 60 when 29 of them are merchant rules at 200, the other said CREAM was rejected for sitting inside SUNSCREEN, which it does not. Reading around those findings turned up a real defect: `CASHEWS` contains `CASH`, so a bag of cashews was discarded as a summary line and its money with it; `Q-TIPS` had the same fault through `TIP`. Summary words are matched on whole words now, which in turn exposed that OCR reads `TAX1` as `TAXI` (§11.44). Also narrowed which amounts can disqualify an item (§11.45) and closed a real publishing risk: `pictures/` was ignored only because today's files happen to be `.jpg` (§11.46). 308 tests. |
 | 1.9.2 | 2026-08-31 | **Three problems from a real scan, two fixed and one deliberately not.** `ME DEPOSIT` was translating as 我存款 — "my deposit" — because ME is Maine and only a receipt knows that; a glossary now sits in front of the translator for words only a till roll explains (§11.42). Correcting an item's name now drops its barcode expansion with it: the wrong-name problem cannot be detected automatically (§11.31), so the reviewer editing the line is taken as the signal that the machine misread it (§11.43). The third — a line the OCR simply never read — was attacked twice and both attempts rejected: a union of the two passes, and a greedy fill that never overshoots the subtotal, cut the unaccounted money from $28.47 to $15.57 and $2.77 respectively, and invented 5 and 4 lines to do it. The reading currently invents nothing across six photographs, which is worth more than a better number (§11.41). 306 tests. |
 | 1.9.1 | 2026-08-31 | **A cash-rounding line was being spent.** Re-scanning the real books after 1.9.0 showed `ROUNDING 0.04` sitting in the item list: Walmart prints it between TOTAL and CHANGE DUE, in the item column, with an amount, and it was read as a purchase. Four cents of money the receipt never spent, and it broke the check that says whether a reading adds up. It also means the 1.8.0 figures counted it as a success — "24 of 24" on Walmart1 was 23 real lines plus this — so the totals in §3 are corrected to 69 items and $28.47 unaccounted (§11.40). 301 tests. |
