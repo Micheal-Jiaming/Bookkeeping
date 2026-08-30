@@ -215,7 +215,7 @@ def test_an_item_no_rule_matches_keeps_the_models_category(books, monkeypatch,
     reading = ExtractedReceipt(
         merchant="Corner Bakery", purchased_at="2026-07-14", subtotal="6.00",
         tax="0.00", total="6.00", confidence=0.9,
-        items=[ExtractedItem(description="SOURDOUGH BOULE", amount="6.00",
+        items=[ExtractedItem(description="ARTISAN BOULE", amount="6.00",
                              category="Dining")],
     )
     monkeypatch.setattr(books["pipeline"], "build_engines",
@@ -507,7 +507,7 @@ def test_backfill_does_not_let_a_merchant_rule_overwrite_the_models_choice(
     reading = ExtractedReceipt(
         merchant="Walmart", purchased_at="2026-07-14", subtotal="6.00", tax="0.00",
         total="6.00", confidence=0.9,
-        items=[ExtractedItem(description="SOURDOUGH BOULE", amount="6.00",
+        items=[ExtractedItem(description="ARTISAN BOULE", amount="6.00",
                              category="Dining")],
     )
     monkeypatch.setattr(books["pipeline"], "build_engines",

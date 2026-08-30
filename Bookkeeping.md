@@ -372,7 +372,7 @@ win would reasonably think it was broken:
 review pane as `rule` / `model` / `shop` / `you`), and the rule backfill respects
 it.
 
-113 keyword rules and 15 categories are seeded on first run (`app/db.py`),
+176 keyword rules and 15 categories are seeded on first run (`app/db.py`),
 tuned for US retail receipts: product nouns (`MOP`, `AMMONIA`, `DIAPER`,
 `UNLEADED`), single-category brands (`TIDE`, `LYSOL`, `PAMPERS`, `CLX`), and
 merchant defaults (`WALMART`, `COSTCO`, `CVS`, `SHELL`, …). **No store-brand
@@ -425,12 +425,14 @@ values, so "no tip line" is distinguishable from "a tip of zero".
 ## 4. Data model
 
 SQLite, `data\bookkeeping.db`, schema in `app/db.py`. **`PRAGMA user_version` is
-at 4**; migrations live in `_migrate` and each is written to be a no-op on a
+at 5**; migrations live in `_migrate` and each is written to be a no-op on a
 database that already has the change, so they are safe to re-run. v2 removed the
 `GREAT VALUE` rule (§11.18), v3 added the abbreviation rules the offline engine
-needs, and v4 added the `product_name` cache — v4 has no migration body because
-both its pieces arrive through paths that run on every open (`CREATE TABLE IF
-NOT EXISTS`, and `_seed_settings` inserting any missing key).
+needs, v4 added the `product_name` cache, and v5 added the grocery vocabulary
+(§11.35). v4 has no migration body because both its pieces arrive through paths
+that run on every open (`CREATE TABLE IF NOT EXISTS`, and `_seed_settings`
+inserting any missing key). v3 and v5 share `_add_missing_rules`, which skips
+any pattern the user already has so a rule they deleted stays deleted.
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
@@ -948,6 +950,28 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 
   The Walmart readings are unchanged by all of this, which was checked rather
   than assumed.
+- **The same receipt photographed twice, which settles how much the photograph
+  matters.** `ALDI1.jpg` is deeply crumpled with shadows across the item block;
+  `ALDI1_new.jpg` is the identical receipt shot flat and evenly lit. Same
+  camera, same engine, same parser:
+
+  | | crumpled | flat |
+  | --- | --- | --- |
+  | Line items found | 11 of 18 | **17 of 18** |
+  | Amounts exactly right | 11 of 18 | **17 of 18** |
+  | Line items sum to | 39.03 | **60.59** of 65.17 |
+  | Subtotal / tax / total | all exact | all exact |
+
+  One line is missing from the flat photo -- 2% Milk at $4.58, which is exactly
+  the remaining shortfall. **Photograph quality is the largest single lever on
+  this application's accuracy, and it belongs to the user, not the code.** Flat,
+  evenly lit, shot square on: that is worth more than any tuning available here.
+
+  What it does *not* fix is the item names. Both photographs return 3 of 18
+  names exactly; the flat one still gives `Bik Angs stew Meat`, `NFIGrk Yog
+  yan` and `Whble Whitq Mushrm`. Amounts survive a bad photograph far better
+  than words do, which is why categorisation had to be made noise-tolerant
+  rather than relying on clean text (11.35).
 - **Rotation is a solved problem, and the question raised in 1.5.1 is closed.**
   `Walmart3.jpg` is stored sideways -- 3111x1280 with EXIF orientation 8 -- and
   reads correctly anyway, because `app/images.py` calls `ImageOps.exif_transpose`
@@ -993,7 +1017,7 @@ Python, no venv, no source) — re-run for 1.5.1 with `tools\verify_exe.py`:
 - Startup measured at **3.4–3.6 s** to a visible window, over three runs.
 - The four pages and every theme were screenshotted from the running program and
   inspected: list, review pane with the image and a real arithmetic flag, charts
-  with correct proportions and value labels, 15 categories and 113 rules, and the
+  with correct proportions and value labels, 15 categories and 176 rules, and the
   settings controls.
 - **The frozen build carries a working TLS stack**, which the online lookup
   needs: unpacking the running one-file .exe shows `_ssl.pyd`, `libssl-3.dll`,
@@ -1129,7 +1153,7 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.6.0, for whoever reads this next:
+The state as of 1.7.0, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
@@ -1171,10 +1195,22 @@ The state as of 1.6.0, for whoever reads this next:
   are gitignored, deliberately: a receipt is somebody's shopping and their
   payment method. Do not commit them, and do not paste their card or reference
   numbers into anything.
-- **The known weakness**, if you are deciding what to build: the barcode lookup
-  resolves at best 12 of 20 lines, so more than a third of a receipt still shows
-  only the till's shorthand. §13.2 (learn a rule from a reviewer's correction) is
-  the cheapest improvement, because it turns each manual fix into a permanent one.
+- **The known weaknesses**, if you are deciding what to build:
+  1. **The barcode lookup is Walmart-shaped.** It resolves at best 12 of 20
+     Walmart lines, and **0 of 18 at Aldi** -- Aldi prints six-digit internal
+     article numbers, not barcodes, and no public database knows them. That is
+     not a defect to fix: Aldi already prints readable names, so there is
+     nothing to expand. But do not describe the feature as though it works
+     everywhere.
+  2. **A misread barcode digit yields a confidently wrong name** and cannot be
+     detected (§11.31).
+  3. **Item names survive a bad photograph far worse than amounts do** -- 3 of
+     18 names exact even on a good photograph of an Aldi receipt. Categorisation
+     was made tolerant of that (§11.35) rather than assuming clean text, and
+     anything else built on the item name should assume the same.
+
+  §13.2 (learn a rule from a reviewer's correction) remains the cheapest real
+  improvement, because it turns each manual fix into a permanent one.
 - **Do not** re-add a store-brand keyword rule (§11.18), reintroduce a web
   interface (§10), "simplify" the spec's excludes (§11.11), preprocess the image
   before Windows OCR (§10 — it was measured, and it makes the reading worse), let
@@ -1545,6 +1581,39 @@ The state as of 1.6.0, for whoever reads this next:
     total, and emptying it would be far worse than keeping a stray one
     (`app/extract/receipt_text.py`, `tests/test_units.py`).
 
+35. **The seeded rules were Walmart's vocabulary, not the language of shopping.**
+    Two Aldi receipts categorised **1 item out of 18**. Nothing was broken; the
+    rule list simply had no idea what a green pepper was. Every seeded pattern
+    was either a Walmart abbreviation (`GV`, `SPGE`, `CLX`, `PLNGR`) or one of a
+    dozen pantry staples, because every receipt the project had ever seen was
+    from Walmart. Aldi prints plain English -- "Green Peppers", "Broccoli
+    Crowns", "Flat Leaf Spinach" -- and matched none of it.
+
+    Schema version 5 seeds 63 more: fresh produce, chilled and pantry staples,
+    meat and fish, disposables, and merchant defaults for the supermarkets
+    around the address on these receipts. Result: **17 of 17 and 7 of 7** on the
+    two Aldi receipts, and Walmart improved from 12 of 20 to 15 of 20 as a side
+    effect.
+
+    Two things worth keeping in mind if this list grows again:
+
+    * **The patterns have to survive OCR damage**, because the item names do
+      not. `Whble Whitq Mushrm` still reaches Groceries -- partly on `MUSHRM`,
+      partly on the merchant default, which exists precisely to catch what the
+      keywords miss. Do not assume a rule will see clean text.
+    * **11.22's substring trap applies harder to ordinary words than to brands.**
+      `EGGS` is seeded and `EGG` is not, because LEGGINGS contains EGG. `BEANS`
+      and not `BEAN`, because of BEANIE. `RICE`, `HAM`, `OATS` and `CREAM` were
+      all wanted and all rejected -- they hide inside PRICE, SHAMPOO, COATS and
+      SUNSCREEN, and a rule beats the model, so a false match is not a small
+      thing.
+
+    Seeding `SOURDOUGH` also broke two tests in `tests/test_store.py` that had
+    used "SOURDOUGH BOULE" as their example of a description no rule matches.
+    They are about precedence rather than about bread, so the example became
+    "ARTISAN BOULE"; a test whose fixture quietly starts matching a rule has
+    stopped testing what its name claims (`app/db.py`, `tests/test_store.py`).
+
 ---
 
 ## 12. Version control
@@ -1632,6 +1701,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.7.0 | 2026-08-31 | **Categorisation learns the language of shopping, and a controlled test of photo quality.** The user re-photographed one Aldi receipt flat and evenly lit, which answered a question the project could not answer for itself: the identical receipt went from 11 of 18 line items to **17 of 18**, with the missing $4.58 being exactly the remaining shortfall. Photograph quality is the largest single lever on accuracy and it belongs to the user, not the code (section 9). What it did not fix was the item *names* — 3 of 18 either way — so the rules had to be made noise-tolerant instead. Schema v5 seeds 63 more keyword rules: fresh produce, chilled and pantry staples, meat and fish, disposables, and merchant defaults for the supermarkets near these receipts. Categorisation on the two Aldi receipts went from **1 of 18 to 24 of 24**, and Walmart improved from 12 of 20 to 15 of 20 as a side effect. Choosing those patterns re-applied 11.22's substring trap, which bites harder on ordinary words than on brands: EGGS and not EGG because of LEGGINGS, BEANS and not BEAN because of BEANIE, and RICE, HAM, OATS and CREAM all rejected outright (11.35). 282 tests. |
 | 1.6.0 | 2026-08-31 | **A second chain: the parser stops assuming Walmart.** The user supplied two Aldi receipts, and they broke the reader badly -- one read as *zero* real items, its only "item" being the Mastercard line. Five structural assumptions were at fault, all recorded in 11.33: a two-letter tax flag (`FA`, `NB`) that a one-letter pattern rejected outright, an item number printed before the name instead of a barcode after it, weighed goods laid out in the opposite order, one tax line per band with the zero band last, and a clipped `AMOUNT D` where `AMOUNT DUE` was expected. Payment lines are now recognised by shape rather than by name, because OCR turned `Mastercard` into `Mas*ercard` (11.34). Result: `ALDI2.jpg` reads all 7 items with every amount exact and summing exactly to the printed subtotal; `ALDI1.jpg` -- a badly crumpled photo with shadows across the item block -- reads 11 of 18 with subtotal, tax and total all exact. What it still misses there is OCR quality, not parsing. The three Walmart readings are unchanged, which was checked rather than assumed. Photographs now live in `pictures\` and remain gitignored. 282 tests. |
 | 1.5.2 | 2026-08-31 | **All three receipts through the real OCR engine, as images.** The user put the photographs on disk, so the pipeline was finally exercised end to end rather than on transcriptions. Results in section 9: the totals block is read exactly on two of three, every line item on `Walmart2.jpg`, and every reading is flagged honestly for what it missed. Two findings worth more than the numbers. **Rotation turned out to be a non-issue** -- the sideways photograph carries an EXIF orientation tag and `images.normalise` already honours it, so the try-every-orientation work floated in 1.5.1 is not needed (section 9). **A misread barcode digit produces a confidently wrong product name** -- a toothpaste came back as an Audi cylinder head gasket -- and it cannot be detected, because recomputing Walmart's missing check digit discards the only error detection a barcode has. Two mitigations were built and measured and neither worked; what shipped is the review pane labelling every expansion "from barcode:", so a reviewer weighs it rather than trusting it (11.31). Separately, shrinking the image for OCR was implemented, measured and reverted: it finds more line items but loses the TOTAL on all three receipts (11.32). 274 tests. |
 | 1.5.1 | 2026-08-31 | **Two more real receipts, and the two defects they found.** The user supplied a second and third Walmart receipt, which between them broke the line parser in ways the first could not. An item printed with no name -- just its barcode where the description goes -- was thrown away entirely by the guard that keeps phone numbers out of the item list, losing $5.88 off a $23.52 receipt with no error of any kind. An item sold by weight prints its name on one line and its price on the next, so it was read with the right money and the name "0.42 lb @ 1.00 lb / 3.62". Both fixed, both now permanent fixtures; every amount on both receipts is read and sums exactly to the printed subtotal. The barcode repair was also tightened: it now rebuilds a check digit only when the printed code ends in the zero that marks a truncation, because the receipts contained two codes -- a bottle deposit and a produce PLU -- that are not barcodes at all, and a rebuilt code that happens to exist would put the wrong product on the line. One of those receipts also confirmed the whole zero-padding theory in a single line, printing `756809105667 756809105660` -- the true UPC beside its truncated form. Fixes 11.29-11.30. 274 tests. |
