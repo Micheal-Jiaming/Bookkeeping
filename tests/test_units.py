@@ -383,3 +383,97 @@ def test_a_carried_name_is_not_attached_to_an_unrelated_later_line():
         "COKE          049000050110          3.04 X\n"
         "TOTAL 3.04\n")
     assert [i.description for i in receipt.items] == ["COKE"]
+
+
+# --- Aldi, a second chain with a different layout --------------------------
+#
+# Aldi differs from Walmart in every structural way that matters: the item
+# number is printed before the name rather than after, the tax flag is two
+# letters, weighed goods put the price on the first line and the weighing on
+# the next (the opposite of Walmart), and the grand total is letter-spaced.
+# Transcribed from the receipt of 2026-08-21, shortened to five lines.
+
+ALDI = """\
+ALDI
+Store #163
+1100 Brighton Avenue
+Portland, ME
+343415 24ct Paper Bowl        2.69 NB
+356387 Green Peppers          2.69 FA
+385448 Sourdough Loaf         3.49 F A
+356508 Broccoli Crowns        3.66 FA
+   1.75 lb x  2.09/lb
+341876 Red Grapes LRW         3.20 FA
+   (G) 2.50lb -   (T) 0.02lb
+   (N) 2.48 lb x  1.29/lb
+Mas*ercard                   15.73
+SUBTOTAL                     15.73
+B-Taxable @5.500%             0.15
+A-Taxable @0.00%              0.00
+AMOUNT D                     15.88
+T O T A L                  $ 15.88
+5 ITEMS
+08/21/26 10:14
+"""
+
+
+def test_a_two_letter_tax_flag_does_not_discard_the_line():
+    """Aldi flags every line "FA" or "NB", and OCR sometimes splits them.
+
+    The amount pattern allowed a single flag letter, so no Aldi line matched at
+    all and a whole receipt read as zero items.
+    """
+    receipt = parse_receipt_text(ALDI)
+    assert [i.amount for i in receipt.items] == ["2.69", "2.69", "3.49", "3.66", "3.20"]
+    assert sum(to_cents(i.amount) for i in receipt.items) == to_cents(receipt.subtotal)
+
+
+def test_the_aldi_tax_flags_are_understood():
+    """NB is taxable and FA is not -- confirmed by the receipt's own arithmetic."""
+    receipt = parse_receipt_text(ALDI)
+    by_name = {i.description: i for i in receipt.items}
+    assert by_name["24ct Paper Bowl"].taxable is True          # NB
+    assert by_name["Green Peppers"].taxable is False           # FA
+    assert by_name["Sourdough Loaf"].taxable is False          # "F A", split by OCR
+
+
+def test_an_item_number_printed_before_the_name_becomes_the_sku():
+    receipt = parse_receipt_text(ALDI)
+    assert [i.sku for i in receipt.items] == [
+        "343415", "356387", "385448", "356508", "341876"]
+    assert [i.description for i in receipt.items] == [
+        "24ct Paper Bowl", "Green Peppers", "Sourdough Loaf",
+        "Broccoli Crowns", "Red Grapes LRW"]
+
+
+def test_a_weight_line_is_not_an_item():
+    """"(T) 0.02lb" must not parse as the amount 0.02 with the tax flag "lb"."""
+    receipt = parse_receipt_text(ALDI)
+    assert not any("lb" in (i.description or "") for i in receipt.items)
+    assert "0.02" not in [i.amount for i in receipt.items]
+
+
+def test_a_zero_rate_does_not_erase_the_tax_that_was_found():
+    """Aldi prints one line per tax band, and the zero band prints last."""
+    assert parse_receipt_text(ALDI).tax == "0.15"
+
+
+def test_a_clipped_amount_due_still_gives_the_total():
+    """OCR reads "AMOUNT DUE" as "AMOUNT D" often enough to matter."""
+    assert parse_receipt_text(ALDI).total == "15.88"
+
+
+def test_a_payment_line_is_not_counted_as_a_purchase():
+    """OCR mangled "Mastercard" to "Mas*ercard", which no word list catches.
+
+    What gives it away is the shape: no item number, and an amount equal to the
+    receipt's own subtotal.
+    """
+    assert "Mas*ercard" not in [i.description for i in parse_receipt_text(ALDI).items]
+
+
+def test_a_single_item_receipt_is_never_emptied_by_that_rule():
+    """A lone item legitimately equals the total; dropping it would be worse."""
+    receipt = parse_receipt_text(
+        "CORNER SHOP\nBread 3.50\nTOTAL 3.50\n")
+    assert [i.description for i in receipt.items] == ["Bread"]

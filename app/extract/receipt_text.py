@@ -31,8 +31,25 @@ from .base import ExtractedItem, ExtractedReceipt
 # and an uppercase-only pattern silently rejected the whole line -- which cost
 # 15 of the 20 readable items on the first real receipt.
 _TRAILING_AMOUNT = re.compile(
-    r"(?P<amount>-?\$?\d[\d,]*\.\d{2})\s*(?P<minus>-)?\s*(?P<flag>[A-Za-z])?\s*$"
+    r"(?P<amount>-?\$?\d[\d,]*\.\d{2})\s*(?P<minus>-)?"
+    r"(?:\s+(?P<flag>[A-Za-z](?:\s?[A-Za-z])?))?\s*$"
 )
+
+# What the flag after the price means. Walmart prints one letter; Aldi prints
+# two ("FA", "NB"), and OCR sometimes splits those into "F A", hence the
+# optional space in the pattern above.
+#
+# The Aldi mapping was read off the receipt's own arithmetic rather than
+# guessed: on the 18-line receipt the single NB line is a $2.69 pack of paper
+# bowls, and the printed "B-Taxable @5.500%" line is $0.15 -- which is
+# 2.69 x 0.055. Every other line is FA and contributes nothing to the tax.
+_TAX_FLAGS = {
+    "X": True, "T": True, "N": False, "O": False,   # Walmart
+    "NB": True, "FA": False,                        # Aldi
+}
+
+# The flag must be separated from the amount by a space, or a weight line like
+# "(T) 0.02lb" parses as the amount 0.02 with the tax flag "lb".
 _QTY_AT_PRICE = re.compile(r"(?P<qty>\d+(?:\.\d+)?)\s*(?:@|X)\s*\$?(?P<unit>\d[\d,]*\.\d{2})")
 _LEADING_QTY = re.compile(r"^(?P<qty>\d{1,3})\s+(?=\D)")
 _SKU = re.compile(r"\b(\d{9,14})\b")
@@ -59,6 +76,16 @@ _WEIGHED = re.compile(
 # purchase" guard below would otherwise reject it, silently losing $5.88.
 _BARE_BARCODE = re.compile(r"^\d{9,14}$")
 
+# Aldi prints its item number *before* the description -- "356387 Green
+# Peppers" -- where Walmart prints a barcode after it. The number is six digits
+# rather than a UPC's twelve, so _SKU never sees it and the digits end up inside
+# the item name. Bounded at 4-8 digits so it cannot swallow a real barcode, and
+# it only ever runs when no barcode was found, so Walmart's layout is untouched.
+# The name after the number may itself begin with a digit -- "24ct Paper Bowl",
+# "2% Milk" -- so the test for "is this a name" is that a letter appears
+# somewhere in what follows, applied in _find_items rather than in the pattern.
+_LEADING_ITEM_NO = re.compile(r"^(?P<no>\d{4,8})\s+(?=\S)")
+
 _DATE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b"), "ymd"),
     (re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b"), "mdy"),
@@ -73,6 +100,8 @@ _SUMMARY_WORDS = (
     "TC#", "REF #", "APPROVAL", "AUTH", "ACCOUNT", "NETWORK ID", "TERMINAL",
     "THANK YOU", "SURVEY", "www.", "POINTS", "REWARD", "MEMBER", "STORE #",
     "OP#", "TE#", "TR#",
+    # Aldi's summary block and card trailer.
+    "TAXABLE", "AMOUNT", "ITEMS", "APPROVED", "TRACE", "CASHIER",
 )
 _DISCOUNT_WORDS = (
     "COUPON", "DISCOUNT", "ROLLBACK", "MARKDOWN", "PROMO", "VOID", "REFUND",
@@ -124,7 +153,7 @@ def parse_receipt_text(text: str) -> ExtractedReceipt:
     receipt.tip = summary.get("tip")
     receipt.total = summary.get("total")
 
-    receipt.items = _find_items(lines)
+    receipt.items = _find_items(lines, summary)
     return receipt
 
 
@@ -196,17 +225,30 @@ def _find_summary_amounts(lines: list[str]) -> dict[str, str]:
     """
     found: dict[str, str] = {}
     for line in lines:
+        # The space-stripped form is checked too: Aldi letter-spaces its grand
+        # total as "T O T A L", which contains the word only once collapsed.
         upper = line.upper()
+        tight = upper.replace(" ", "")
+        def says(*words: str) -> bool:
+            return any(w in upper or w.replace(" ", "") in tight for w in words)
+
         amount = _trailing_amount_text(line)
         if amount is None:
             continue
-        if "SUBTOTAL" in upper or "SUB TOTAL" in upper:
+        if says("SUBTOTAL", "SUB TOTAL"):
             found["subtotal"] = amount
-        elif "TAX" in upper:
-            found["tax"] = amount
-        elif "TIP" in upper or "GRATUITY" in upper:
+        elif says("TAX"):
+            # A receipt may print one tax line per rate -- Aldi prints
+            # "B-Taxable @5.500%  0.15" and then "A-Taxable @0.00%  0.00". Last
+            # line wins everywhere else in this function, but here that would
+            # report no tax at all, so a zero never displaces a figure already
+            # found. Two genuinely non-zero rates would still take the last;
+            # no receipt seen here does that.
+            if amount.strip("$ ").lstrip("-") not in ("0.00", "0") or "tax" not in found:
+                found["tax"] = amount
+        elif says("TIP", "GRATUITY"):
             found["tip"] = amount
-        elif "TOTAL" in upper or "AMOUNT DUE" in upper or "BALANCE DUE" in upper:
+        elif says("TOTAL", "AMOUNT D", "BALANCE DUE"):
             found["total"] = amount
     return found
 
@@ -222,15 +264,47 @@ def _trailing_amount_text(line: str) -> str | None:
 
 
 def _is_summary_line(upper: str) -> bool:
-    return any(word in upper for word in _SUMMARY_WORDS)
+    """Whether a line belongs to the receipt's summary rather than its purchases.
+
+    The space-stripped form is checked as well, because a till often letter-
+    spaces its emphasis: Aldi prints the grand total as "T O T A L", which
+    contains the word TOTAL only once the spaces are gone. Stripping can only
+    add matches, and every summary word is long enough that collapsing spaces
+    does not make one appear inside an ordinary item name.
+    """
+    return any(word in upper or word in upper.replace(" ", "")
+               for word in _SUMMARY_WORDS)
 
 
-def _find_items(lines: list[str]) -> list[ExtractedItem]:
+def _find_items(
+    lines: list[str], summary: dict[str, str] | None = None
+) -> list[ExtractedItem]:
     items: list[ExtractedItem] = []
     # A name and barcode seen on a line that carried no price. Goods sold by
     # weight print that way, with the money on the line below; holding the name
     # for exactly one line is what lets the two halves be joined back together.
     carried: tuple[str, str | None] | None = None
+
+    # A card brand followed by the amount charged -- "Mastercard  17.43" -- is a
+    # payment line, not a purchase, but OCR corrupts the brand name often enough
+    # ("Mas*ercard") that the word list cannot be relied on to catch it. What is
+    # reliable is the shape: no item number, and an amount equal to the receipt's
+    # own total. Such a line is dropped below, but only when other items were
+    # found, so a genuine single-item receipt is never emptied.
+    payment_amounts = {
+        (summary or {}).get(key, "").strip("$ ")
+        for key in ("total", "subtotal")
+    }
+    # Aldi prints the card total twice -- once beside the brand, once as
+    # "Credit Card $17.43". OCR mangled the first into "Mas*ercard", which no
+    # word list will match, but the second is clean, and the amount is the same.
+    for line in lines:
+        if _is_summary_line(line.upper()):
+            amount = _trailing_amount_text(line)
+            if amount:
+                payment_amounts.add(amount.strip("$ "))
+    payment_amounts -= {""}
+    suspect: list[int] = []
 
     for line in lines:
         upper = line.upper()
@@ -252,6 +326,11 @@ def _find_items(lines: list[str]) -> list[ExtractedItem]:
 
         sku_match = _SKU.search(head)
         sku = sku_match.group(1) if sku_match else None
+        if not sku_match:
+            leading = _LEADING_ITEM_NO.match(head)
+            if leading and re.search(r"[A-Za-z]", head[leading.end():]):
+                sku = leading.group("no")
+                head = head[leading.end():].strip(" .-*")
         if sku_match:
             # Walmart prints a second flag between the UPC and the price -- "F"
             # for food, "N" for non-taxable -- which is not part of the item
@@ -294,6 +373,9 @@ def _find_items(lines: list[str]) -> list[ExtractedItem]:
         if to_cents(amount_text) in (None, 0):
             continue
 
+        if sku is None and amount_text.strip("$ ") in payment_amounts:
+            suspect.append(len(items))
+
         items.append(
             ExtractedItem(
                 description=description,
@@ -302,11 +384,15 @@ def _find_items(lines: list[str]) -> list[ExtractedItem]:
                 unit_price=unit_price,
                 amount=amount_text,
                 is_discount=is_discount,
-                taxable={"X": True, "T": True, "N": False, "O": False}.get(
-                    (match.group("flag") or "").upper()
+                taxable=_TAX_FLAGS.get(
+                    (match.group("flag") or "").upper().replace(" ", "")
                 ),
             )
         )
+
+    if suspect and len(suspect) < len(items):
+        for index in reversed(suspect):
+            items.pop(index)
     return items
 
 
