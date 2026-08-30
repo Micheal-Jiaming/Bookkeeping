@@ -448,26 +448,36 @@ class ReviewPane:
         theme = self.theme
         row = tk.Frame(parent, bg=theme["CARD"])
         row.pack(fill="x", pady=1)
+        line = tk.Frame(row, bg=theme["CARD"])
+        line.pack(fill="x")
 
         description = tk.StringVar(value=item.get("description", ""))
         quantity = tk.StringVar(
             value="" if item.get("quantity") in (None, "") else _trim_number(item["quantity"]))
         amount = tk.StringVar(value=from_cents(item.get("amount_cents")))
 
-        entry(row, theme, width=30, textvariable=description).pack(side="left", padx=(0, 3))
-        entry(row, theme, width=5, textvariable=quantity).pack(side="left", padx=(0, 3))
-        amount_box = entry(row, theme, width=9, textvariable=amount)
+        entry(line, theme, width=30, textvariable=description).pack(side="left", padx=(0, 3))
+        entry(line, theme, width=5, textvariable=quantity).pack(side="left", padx=(0, 3))
+        amount_box = entry(line, theme, width=9, textvariable=amount)
         amount_box.pack(side="left", padx=(0, 3))
         amount_box.bind("<KeyRelease>", lambda _e: self._update_sum())
-        combo = self._category_combo(row, item.get("category_id"))
+        combo = self._category_combo(line, item.get("category_id"))
         combo.configure(width=18)
         combo.pack(side="left", padx=(0, 3))
 
         source = item.get("category_source") or "manual"
-        tk.Label(row, text={"rule": "rule", "model": "model", "merchant": "shop",
-                            "manual": "you", "default": "—"}.get(source, source),
+        tk.Label(line, text={"rule": "rule", "model": "model", "merchant": "shop",
+                             "manual": "you", "default": "—"}.get(source, source),
                  bg=theme["CARD"], fg=theme["DIM"], font=theme.font(8),
                  width=5).pack(side="left")
+
+        # The printed name stays in the editable field because it is what the
+        # receipt actually says. The expansion goes underneath it, where it
+        # answers "what *is* EQJELLUBE8OZ?" without overwriting the evidence.
+        readable = (item.get("raw_description") or "").strip()
+        if readable:
+            tk.Label(row, text=readable, bg=theme["CARD"], fg=theme["DIM"],
+                     font=theme.font(8), anchor="w").pack(fill="x", padx=(6, 0))
 
         record = {
             "frame": row, "description": description, "quantity": quantity,

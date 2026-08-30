@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import settings_store
+from . import lookup, settings_store
 from .categorize import category_index, category_names, load_rules, resolve_category
 from .db import IMAGE_DIR, connect
 from .extract import ExtractionError, ExtractionResult, build_engines
@@ -119,8 +119,45 @@ def scan_now(receipt_id: int) -> dict:
         _set_status(receipt_id, "failed", error=" | ".join(attempts))
         return _fetch(receipt_id)
 
+    _expand_item_names(result, settings)
     _store_result(receipt_id, result, fallback_notes=attempts)
     return _fetch(receipt_id)
+
+
+def _expand_item_names(result: ExtractionResult, settings: dict[str, str]) -> int:
+    """Fill in plain-English names for lines whose printed name is shorthand.
+
+    Runs between reading and storing so the expansion is available to category
+    matching as well as to the reviewer -- ``resolve_category`` searches the
+    readable name too, which is how ``CLX PLNGR`` reaches Household at all.
+
+    Only ever fills a blank. A name the vision model supplied stays: it was
+    produced from the receipt in front of it, including context a barcode
+    catalogue does not have, so it is the better of the two.
+    """
+    missing = [item for item in result.receipt.items
+               if not (item.readable_name or "").strip()]
+    if not missing:
+        return 0
+
+    try:
+        names = lookup.names_for_skus(
+            [item.sku for item in missing],
+            enabled=settings.get("online_lookup", "1") == "1",
+        )
+    except Exception:  # offline, DNS down, a service changing shape
+        log.exception("Product name lookup failed; keeping the printed names")
+        return 0
+
+    filled = 0
+    for item in missing:
+        name = names.get(item.sku or "")
+        if name:
+            item.readable_name = name
+            filled += 1
+    if filled:
+        log.info("Expanded %d of %d abbreviated item name(s)", filled, len(missing))
+    return filled
 
 
 def _store_result(

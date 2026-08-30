@@ -23,7 +23,7 @@ from .paths import default_data_dir
 
 log = logging.getLogger("bookkeeping.db")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -113,6 +113,20 @@ CREATE TABLE IF NOT EXISTS line_item (
 );
 
 CREATE INDEX IF NOT EXISTS idx_item_receipt ON line_item(receipt_id);
+
+-- Barcode -> plain-English product name, filled from the free lookup services
+-- in app/lookup. Keyed by the repaired UPC rather than the number printed on
+-- the receipt, so two shops printing the same product agree.
+--
+-- A NULL name is a real answer, not a gap: it records that the services were
+-- asked and did not know. Without it every unknown item would be re-queried on
+-- every scan, which is both slow and the fastest way to exhaust a free quota.
+CREATE TABLE IF NOT EXISTS product_name (
+    upc        TEXT PRIMARY KEY,
+    name       TEXT,
+    source     TEXT,
+    fetched_at TEXT NOT NULL
+);
 """
 
 # (name, color, sort_order). Deliberately a short, general list: a long taxonomy
@@ -295,6 +309,11 @@ DEFAULT_SETTINGS = {
     "ocr_language": "",               # Windows OCR language tag; "" picks English
     "tesseract_cmd": "",              # explicit path to tesseract.exe if not on PATH
     "auto_confirm_clean": "0",        # 1 = skip review when validation is clean
+    # 1 = expand abbreviated item names by looking their barcode up online.
+    # On by default: a till's shorthand is the single least readable thing about
+    # a scanned receipt, and the sources are free and keyless. Turning it off
+    # still uses names already cached, so the app degrades rather than forgets.
+    "online_lookup": "1",
     # Interface state. Kept here rather than in a separate config file so a
     # portable copy carries its own appearance with the books.
     "theme": "dark",                  # any key of app.ui.theme.THEMES
@@ -403,6 +422,13 @@ def _migrate(db: sqlite3.Connection, previous: int) -> None:
         if added:
             log.info("Added %d built-in categorisation rules for abbreviated "
                      "item names", added)
+
+    # Version 4 adds the product_name cache and the online_lookup setting, and
+    # deliberately has no clause here. Both arrive on an existing database
+    # through paths that already run on every open: the table through the
+    # CREATE TABLE IF NOT EXISTS in SCHEMA, the setting through _seed_settings,
+    # which inserts any key missing from DEFAULT_SETTINGS. The version is still
+    # bumped so that user_version describes the shape the code expects.
 
 
 def _seed_categories(db: sqlite3.Connection) -> None:

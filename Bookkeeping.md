@@ -48,6 +48,16 @@ From the user, 2026-08-23, in the order they arrived:
    delivered in 1.3.0. The cause was not a parsing bug: neither engine was
    installed, so recognition had never actually run on this machine. Fixed by
    adding an engine that needs no installation — see §3 and §9.)
+8. **Show product names an ordinary person understands, not the store's internal
+   shorthand.** (2026-08-31, delivered in 1.5.0 — see §3. The user asked for the
+   names to be looked up on Walmart's website; that turned out to be impossible
+   from a program, and the barcode route was used instead. Both are explained in
+   §3, because the substitution was a judgement call worth recording.)
+9. **The application should ultimately operate online**, because some information
+   can only be obtained by querying it and accuracy depends on that. (Stated
+   2026-08-31. Partly delivered in 1.5.0. This reverses the emphasis of the
+   1.3.0 work without discarding it: offline operation remains the fallback that
+   makes a portable .exe usable on any machine, but it is no longer the target.)
 
 Three design questions were answered by the user before any code was written:
 
@@ -267,6 +277,58 @@ found a total, produced items, and whose amounts add up to the printed subtotal
 got the layout right; one that did not, did not. It is capped at 0.5 either way,
 so an offline reading never auto-confirms.
 
+### Turning `CLX PLNGR` into something a person can read (1.5.0)
+
+A till prints its own shorthand, and no amount of local cleverness recovers the
+words: "Clorox Plunger" simply is not in the string `CLX PLNGR`. The expansion
+has to come from somewhere that knows the product, and the receipt already
+carries the key — the barcode number printed beside each line.
+
+**The detail that decides whether this works at all**, and the one to preserve if
+this code is ever rewritten: *the number Walmart prints is not a valid barcode.*
+It prints the first eleven digits of the UPC and pads the twelfth column with a
+zero, dropping the check digit that every product database validates before it
+answers. Seven of the eight codes on the reference receipt fail UPC-A validation
+as printed; the eighth passes only because its true check digit happens to be
+zero. Querying the printed number returns "bad request" or "not found" — which is
+indistinguishable from "this product does not exist", so the failure looks like
+the lookup service being useless rather than like a bug. `app/lookup/upc.py`
+recomputes the check digit, and that alone is what makes the feature work.
+
+Two free, keyless sources answer, and they are complementary rather than
+redundant:
+
+- **Open Food Facts** — open data, no key, no quota, food and drink only.
+- **UPCitemdb** — a commercial catalogue whose trial tier needs no key and allows
+  roughly a hundred lookups a day per address. It covers the household and
+  personal-care items Open Food Facts has never heard of.
+
+Measured on the reference receipt (20 distinct lines): **12 resolve** with both
+services answering, **8** with UPCitemdb's daily allowance spent and Open Food
+Facts alone. Two lines can never resolve — a bottle deposit and bakery bread
+carry codes the shop assigned itself, in UPC number systems 2/4/5/9, which are
+unique only inside that chain — so the real ceiling is 18, not 20.
+
+The expansion pays for itself twice, because `resolve_category` searches the
+readable name as well as the printed one: correct categories on that receipt go
+from **14/20 to 17/20**. `HS SH CLS8.5` and `AIM TP 5.5OZ` only reach Personal
+Care once something in the text says "shampoo" and "toothpaste". No line was
+categorised worse.
+
+**Walmart's own website is not a source and cannot be.** Requests to walmart.com
+from a program are answered with a bot-check page titled "Robot or human?"
+rather than the product, whatever headers are sent — verified directly, on both
+the search and product-page URLs. Their catalogue is reachable only through the
+affiliate/marketplace API, which needs an approved developer account and a
+signed key. The barcode route gets the same names without pretending to be a
+browser, and works for any chain rather than just this one.
+
+Everything is cached in the `product_name` table, hits and misses alike, so a
+second receipt from the same shop asks the network almost nothing. Caching the
+misses is deliberate: without it the eight unresolvable lines would be re-queried
+on every scan and would exhaust the free quota on questions already answered. A
+miss is retried after 30 days, because these catalogues grow.
+
 ### Categorisation precedence
 
 Implemented in `app/categorize.py`, strongest first. The same list is printed on
@@ -343,7 +405,13 @@ values, so "no tip line" is distinguishable from "a tip of zero".
 
 ## 4. Data model
 
-SQLite, `data\bookkeeping.db`, schema in `app/db.py` (`PRAGMA user_version = 1`).
+SQLite, `data\bookkeeping.db`, schema in `app/db.py`. **`PRAGMA user_version` is
+at 4**; migrations live in `_migrate` and each is written to be a no-op on a
+database that already has the change, so they are safe to re-run. v2 removed the
+`GREAT VALUE` rule (§11.18), v3 added the abbreviation rules the offline engine
+needs, and v4 added the `product_name` cache — v4 has no migration body because
+both its pieces arrive through paths that run on every open (`CREATE TABLE IF
+NOT EXISTS`, and `_seed_settings` inserting any missing key).
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
@@ -351,7 +419,8 @@ SQLite, `data\bookkeeping.db`, schema in `app/db.py` (`PRAGMA user_version = 1`)
 | `line_item` | purchased lines | description (+ `raw_description` = the model's plain-English expansion), sku, quantity, unit price, amount, category, `category_source`, `is_discount`, `taxable` |
 | `category` | expense categories | name (unique), colour chip, `is_builtin`, sort order |
 | `category_rule` | keyword rules | field (`description`/`merchant`), match type (`contains`/`regex`), pattern, category, priority (lower first), enabled |
-| `setting` | key/value settings | engine preference, API key, model, effort, Tesseract path, auto-confirm, **plus the interface's own state**: theme, window geometry, last page |
+| `product_name` | barcode → readable name | the online lookup's cache: repaired UPC, name, which source knew it, when. A `NULL` name is a real answer ("asked, nobody knew"), not a gap — see §3 |
+| `setting` | key/value settings | engine preference, API key, model, effort, Tesseract path, auto-confirm, online lookup, **plus the interface's own state**: theme, window geometry, last page |
 
 The interface state lives in the same database on purpose: a portable copy then
 carries its appearance along with its books, and there is no second config file
@@ -386,6 +455,10 @@ app/extract/            recognition engines behind one interface
     windows_ocr.py      Windows' own OCR + word-box row reconstruction
     tesseract_ocr.py    Tesseract, if the user installed it
     receipt_text.py     shared: receipt text → ExtractedReceipt
+app/lookup/             plain-English product names from a barcode (online)
+    upc.py              the check-digit repair a Walmart receipt needs
+    product_names.py    Open Food Facts + UPCitemdb, paced and time-boxed
+    __init__.py         the SQLite cache, and the entry point the pipeline calls
 app/categorize.py       the precedence chain
 app/validate.py         arithmetic checks → review flags
 app/db.py               schema and seed data
@@ -418,14 +491,20 @@ Themes are chosen from **View → Theme**, which marks the active one; the
   the arithmetic complaints in plain words, an editable line-item grid with a
   live "Lines: 60.59 (off by 4.00)" readout, and the actions — *Save & confirm*,
   *Save draft*, *Re-scan*, *Output* (exactly what the engine returned), *Delete*.
+  Where a plain-English name is known, it sits in small muted text **under** the
+  item, not in place of it: the editable field keeps what the receipt actually
+  says, and the expansion answers "what *is* `EQJELLUBE8OZ`?" without
+  overwriting the evidence.
 - **Reports** — four stat tiles, spend by category, spend by month, a top-merchant
   table, and a note explaining the `Tax & unitemised` bucket. Range presets plus
   explicit from/to dates, and CSV export.
 - **Categories & rules** — categories with usage counts, the rule list, add and
   delete, the precedence explanation, and the backfill button.
 - **Settings** — engine, API key (masked), model, effort, base URL, offline OCR
-  language, Tesseract path, auto-confirm, live engine status, what a scan costs,
-  and where the data folder is.
+  language, Tesseract path, auto-confirm, **look product names up online**, live
+  engine status, what a scan costs, and where the data folder is. The lookup
+  checkbox says what leaves the machine: only the barcode printed beside an item,
+  never the shop, the date or the price.
 
 Keyboard: `Ctrl+O` add images, `Ctrl+V` paste an image from the clipboard,
 `Ctrl+N` add by hand, `Ctrl+1..4` pages, `F5` refresh, `Ctrl+Q` quit.
@@ -505,10 +584,62 @@ else, send them **that one file**: no Python, no installer, no admin rights.
   two portable copies with their own `data` folders both run happily.
 - **First launch takes a few seconds** — a one-file build unpacks itself to a
   temp folder before starting.
-- **Windows may warn** that it is from an unknown publisher (SmartScreen), and
-  some antivirus products are suspicious of PyInstaller executables in general.
-  The build is not code-signed; signing needs a paid certificate. Choose "More
-  info → Run anyway", or build it locally with `build.bat`.
+- **Windows may warn** that it is from an unknown publisher (SmartScreen) — see
+  the section below for exactly when and why. Choose "More info → Run anyway",
+  or build it locally with `build.bat`, which avoids the warning entirely.
+
+### The SmartScreen warning: what it is and what it is not
+
+This confuses people, so it is written out properly. Verified on this machine:
+`Get-AuthenticodeSignature dist\Bookkeeping.exe` reports **NotSigned**, and the
+file carries **no `Zone.Identifier` stream**.
+
+**The warning is not about the code.** SmartScreen has not examined the program,
+found nothing wrong with it, and is not reporting a defect. It weighs exactly two
+things: whether the file is signed by a publisher it recognises, and whether that
+exact file has been downloaded enough times by enough people without incident.
+A brand-new executable scores zero on both, and a brand-new executable is what
+every honest first release is.
+
+**It only fires on a file that carries the Mark of the Web.** When a browser, an
+email client or a chat app saves a file, it tags it with an NTFS alternate data
+stream recording that it came from the internet. SmartScreen checks that tag.
+This is why the .exe runs silently here but would warn on the machine of anyone
+you send it to: the local build has no such tag. The practical consequences:
+
+- Building it yourself with `build.bat` — never warns.
+- Copying it over a USB stick or a LAN share — normally no tag, so no warning.
+- Downloading it from GitHub, or receiving it through email, WeChat or Teams —
+  tagged, so it warns.
+- The tag can be removed by the recipient: file → Properties → **Unblock**, or
+  `Unblock-File .\Bookkeeping.exe` in PowerShell.
+
+Being unsigned has a second cost that matters more over time: **an unsigned file
+builds reputation per file hash, and every rebuild starts from zero.** A signed
+one accumulates reputation against the certificate, so later versions inherit it.
+Unsigned means version 1.6.0 is as unrecognised as 1.0.0 was.
+
+**Correcting a widely repeated myth:** an EV certificate no longer buys instant
+SmartScreen trust. It used to, and most advice online still says so. Microsoft's
+current guidance is explicit that this behaviour no longer exists and that paying
+the EV premium *for that reason alone* is not justified. A signed app still shows
+a warning on first download — with the publisher's verified name in it, which is
+the real difference.
+
+**The options, honestly costed.** This is the user's decision, not a technical
+one, and doing nothing is defensible for a portfolio project:
+
+| Option | Cost | What it gets |
+| --- | --- | --- |
+| Do nothing | free | The warning stays. Tell recipients to expect it; "More info → Run anyway" works. Fine while the audience is people you can talk to. |
+| Tell people to Unblock | free | Removes the warning per file, per recipient. Needs a sentence of instruction. |
+| Azure Artifact Signing (was Trusted Signing) | ~$9.99/month | Microsoft's own service, no hardware token, integrates with CI. Individual sign-up is open in **the USA and Canada** — which covers this user. Still warns until reputation builds, but with a verified publisher name, and reputation carries across versions. Cheapest real answer. |
+| A traditional OV certificate | ~$200–400/year | Same practical result. Since June 2023 the private key must live on a hardware token or HSM, so it is more fuss than the above. Certificate lifetimes are capped at one year from February 2026. |
+| Microsoft Store | free–$19 one-off | The only route with *no* warning at all: Store apps are re-signed by Microsoft. Costs a store listing and packaging work. |
+
+Antivirus products are a separate, unrelated annoyance: PyInstaller one-file
+executables unpack themselves at startup, which resembles what packed malware
+does, so heuristic scanners sometimes object regardless of signing.
 
 Command line, for a USB stick or debugging:
 
@@ -683,14 +814,14 @@ when done, and check with
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
 | `app/ui/window.py` | 543 | the window: chrome, menus, navigation, poll loop, dialogs |
-| `app/ui/receipts.py` | 645 | receipt list and the review pane |
+| `app/ui/receipts.py` | 655 | receipt list and the review pane |
 | `app/ui/reports.py` | 355 | tiles, hand-drawn canvas charts, merchant table |
 | `app/ui/theme.py` | 356 | four palettes, display scaling, ttk styling, shared widgets |
-| `app/ui/settings_page.py` | 289 | recognition settings |
+| `app/ui/settings_page.py` | 304 | recognition settings |
 | `app/ui/rules.py` | 240 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
-| `app/pipeline.py` | 301 | scan orchestration, thread pool, engine fallback |
-| `app/db.py` | 459 | schema, seed categories and rules, migrations, connections |
+| `app/pipeline.py` | 338 | scan orchestration, thread pool, engine fallback |
+| `app/db.py` | 485 | schema, seed categories and rules, migrations, connections |
 | `app/launcher.py` | 157 | data folder, logging, single-instance lock, error reporting |
 | `app/categorize.py` | 131 | the precedence chain and rule matching |
 | `app/validate.py` | 126 | arithmetic and sanity checks → review flags |
@@ -704,6 +835,9 @@ when done, and check with
 | `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
 | `app/extract/tesseract_ocr.py` | 112 | Tesseract engine (parser now shared) |
 | `app/extract/__init__.py` | 89 | engine registry and fallback order |
+| `app/lookup/product_names.py` | 282 | Open Food Facts + UPCitemdb, paced, time-boxed, failure-tolerant |
+| `app/lookup/__init__.py` | 130 | the barcode-name cache and the entry point the pipeline calls |
+| `app/lookup/upc.py` | 54 | UPC-A check digit; the repair a Walmart receipt needs |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
 | `tools/verify_exe.py` | 218 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
@@ -715,6 +849,7 @@ when done, and check with
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
 | `tests/test_theme.py` | 160 | every palette's contrast and status-distinctness |
+| `tests/test_product_lookup.py` | 317 | barcode repair, both lookup sources, the cache, the rate-limit paths |
 | `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
@@ -728,9 +863,9 @@ when done, and check with
 ## 9. What has and has not been verified
 
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
-2026-08-23, and again on 2026-08-29 for 1.3.0 and 1.4.0:
+2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 221 tests pass** (`pytest tests/ -q`, ~51 s):
+**Automated — 259 tests pass** (`pytest tests/ -q`, ~58 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -752,6 +887,12 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   bundled-resource paths under a simulated `sys._MEIPASS`, the single-instance
   lock (same folder refused, two folders both allowed, released on exit), and
   logging to the data folder.
+- **The product-name lookup** (`tests/test_product_lookup.py`, 38 tests): the
+  check-digit repair against all eight real receipt codes, both sources' parsers,
+  the fallback from food database to catalogue, and — the ones that matter — that
+  a refused request is never cached as "product unknown", and that one source
+  running out of quota does not silence the other. No test touches the network;
+  the single HTTP function is replaced with scripted answers.
 - **Every theme's colours** (`tests/test_theme.py`, 60 tests): each palette is
   complete and well-formed; the accent clears 3:1 on that palette's own chart
   surface and every text pair clears its floor; the accent is at least ΔE 15
@@ -766,9 +907,9 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   description; and the reading of the real receipt is asserted end to end.
 
 **By hand, against the built `Bookkeeping.exe` copied to an empty folder** (no
-Python, no venv, no source) — re-run for 1.4.0 with `tools\verify_exe.py`:
+Python, no venv, no source) — re-run for 1.5.0 with `tools\verify_exe.py`:
 
-- It opens a window titled `Bookkeeping 1.4.0`, class `TkTopLevel`, with the
+- It opens a window titled `Bookkeeping 1.5.0`, class `TkTopLevel`, with the
   receipt icon in the title bar and the File/View/Help menus.
 - It creates `data\bookkeeping.db` (60 KB, seeded) and `data\bookkeeping.log`
   beside itself.
@@ -779,12 +920,21 @@ Python, no venv, no source) — re-run for 1.4.0 with `tools\verify_exe.py`:
   `app/ui/window.py` exists for.
 - A **second launch is refused** with an "Already running" dialog and exits 0.
 - **Closing the window exits cleanly** (code 0), and `--version` afterwards
-  prints `1.4.0` — proving the lock was released.
+  prints `1.5.0` — proving the lock was released.
 - Startup measured at **3.4–3.6 s** to a visible window, over three runs.
 - The four pages and every theme were screenshotted from the running program and
   inspected: list, review pane with the image and a real arithmetic flag, charts
   with correct proportions and value labels, 15 categories and 113 rules, and the
   settings controls.
+- **The frozen build carries a working TLS stack**, which the online lookup
+  needs: unpacking the running one-file .exe shows `_ssl.pyd`, `libssl-3.dll`,
+  `libcrypto-3.dll` and `_socket.pyd`, and Python on Windows reads its
+  certificate authorities from the operating system's own store rather than from
+  a bundled file. **What has *not* been observed is a live lookup made by the
+  .exe itself** -- the program has no command-line hook for scanning, so every
+  measured lookup in this document was made from source. The packaging is
+  verified; the round trip through the frozen binary is inferred. A `--self-test`
+  flag would close that, and is the cheapest way to do so.
 - **Both themes added in 1.4.0 were confirmed from the frozen build**, not only
   from source: the stored theme was set in a portable copy's own books, the .exe
   relaunched, and the window it drew photographed. Dracula and Solarized both
@@ -895,46 +1045,64 @@ are not guessable from the printed text alone.
 - The clipboard-paste path is exercised only by hand-reasoning about
   `ImageGrab.grabclipboard()`; there is no automated test for it.
 - No load or long-horizon testing; no non-USD receipt; no non-Latin-script
-  receipt. The .exe is unsigned, so SmartScreen behaviour on a fresh machine is
-  expected but unobserved.
+  receipt. The .exe is unsigned and carries no Mark of the Web here, so the
+  SmartScreen dialog is **predicted from the mechanism, not observed** — nobody
+  has yet downloaded this build onto a machine that would show it (§7).
+- **The product lookup has been measured against one receipt's barcodes.** The
+  12-of-20 and 8-of-20 figures are that receipt's, on one day, from one IP
+  address. What the free services know about a *different* shop's goods is
+  unmeasured, and both are third parties who may change their terms, their
+  rate limits or their JSON at any time — the code treats every one of those as
+  a non-answer rather than a crash, but the coverage figure would move.
+- The pacing constants (1.2 s per host) were tuned empirically against these two
+  services from this address. They are almost certainly conservative on a
+  different connection and possibly still optimistic on a throttled one.
 
 ### Where to pick up
 
-The state as of 1.4.0, for whoever reads this next:
+The state as of 1.5.0, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
   without an API key or a Tesseract install, and the first real receipt it was
   ever given failed with four red flags and no data. Windows' own OCR now covers
   that case on any Windows 10/11 machine.
-- **Everything is committed, tagged `v1.4.0`, and pushed** to both `origin`
-  (private GitHub) and `mirror`. `dist\Bookkeeping.exe` is built from that commit
-  and passes `tools\verify_exe.py`.
-- **The two open verifications**, in order of value:
-  1. **A live API call.** No Anthropic key has ever been used here, so the
-     primary engine — the whole reason the app exists — is exercised only against
-     a local stand-in. What is proven is that the app handles a reply correctly,
-     not that the model reads a receipt correctly. Put a real key in Settings,
-     add the receipt photo, and compare against the fixture in
-     `tests/test_real_receipt.py` (merchant `null`, date `null`, subtotal 141.94,
-     tax 7.50, total 149.44, 24 lines). If it matches, the last real gap closes;
-     if it does not, the difference is the most interesting data this project can
-     produce.
-  2. **More real receipts.** Everything known about offline accuracy comes from
-     one photograph: 20 of 24 lines, 12 of 20 categorised, $10.33 of $141.94
-     unaccounted. That is this receipt's number, not an accuracy figure. A
-     restaurant bill, a fuel receipt or a faded one would each say something the
-     current fixture cannot.
-- **The known weakness**, if you are deciding what to build: offline OCR cannot
-  expand an abbreviation, so `CLX PLNGR` categorises only because a keyword rule
-  happens to match. §13.2 (learn a rule from a reviewer's correction) is the
-  cheapest real improvement to that.
+- **Everything is committed and tagged**, and pushed to both `origin` (the
+  private GitHub repository) and `mirror`. `dist\Bookkeeping.exe` is built from
+  that commit and passes `tools\verify_exe.py`.
+- **The direction of travel is online, by the user's decision (August 2026):**
+  "my ultimate goal for this software is for it to operate online, as internet
+  connectivity is required to query certain information and provide accurate
+  results." The product-name lookup in 1.5.0 is the first piece of that. Offline
+  operation stays a supported fallback rather than the target — do not remove it,
+  but do not treat "works offline" as a reason to reject a networked feature.
+- **The API key verification is deliberately closed, not pending.** The user
+  cannot supply a key at present and asked, in August 2026, that it be skipped.
+  So the Claude vision engine remains exercised only against a local mock of the
+  Messages API (`tests/test_claude_engine.py`) — the app is proven to handle a
+  reply correctly, not to have received a real one. That is a known and accepted
+  gap. Do not reopen it as a blocking item or plan work around closing it; if a
+  key ever appears, the comparison to run is against the fixture in
+  `tests/test_real_receipt.py` (merchant `null`, date `null`, subtotal 141.94,
+  tax 7.50, total 149.44, 24 lines).
+- **The one genuinely open verification: more real receipts.** Everything known
+  about offline accuracy comes from one photograph — 20 of 24 lines, $10.33 of
+  $141.94 unaccounted, and now 17 of 20 lines categorised correctly. Those are
+  this receipt's numbers, not accuracy figures. The user has offered photographs
+  from other supermarkets; a restaurant bill, a fuel receipt or a faded one would
+  each say something the current fixture cannot. **This is the highest-value
+  thing to ask them for.**
+- **The known weakness**, if you are deciding what to build: the barcode lookup
+  resolves at best 12 of 20 lines, so more than a third of a receipt still shows
+  only the till's shorthand. §13.2 (learn a rule from a reviewer's correction) is
+  the cheapest improvement, because it turns each manual fix into a permanent one.
 - **Do not** re-add a store-brand keyword rule (§11.18), reintroduce a web
   interface (§10), "simplify" the spec's excludes (§11.11), preprocess the image
   before Windows OCR (§10 — it was measured, and it makes the reading worse), let
   the amount repairs in `windows_ocr.py` fire outside the amount column (§11.21),
-  or add a theme without re-running the two colour checks (§11.26 —
-  `tests/test_theme.py` runs them for you).
+  add a theme without re-running the two colour checks (§11.26 —
+  `tests/test_theme.py` runs them for you), parallelise the product lookups
+  (§11.27), or scrape walmart.com (§3 — it answers a bot check, not a product).
 - **Editing this file:** it contains U+202F narrow no-break spaces inside figures
   such as "150 %", which silently defeat exact-string edits. Match on lines that
   do not contain them, or patch by line number.
@@ -1142,6 +1310,27 @@ The state as of 1.4.0, for whoever reads this next:
     tree in Python — the whole check went from a spurious failure to 15 seconds
     (`tools/verify_exe.py`).
 
+27. **Do not parallelise the product lookups, and do not shorten the pacing.**
+    Both free services answer `429` to a burst. Four concurrent workers — the
+    obvious way to write it — made *both* refuse within a dozen calls and cut a
+    receipt that resolves twelve names down to six. Serial requests at 0.7 s
+    still drew refusals partway through; 1.2 s per host resolves all twelve. The
+    reason this is worth a fixed note is that the failure is invisible: a refused
+    barcode and an unknown product produce exactly the same empty result, so the
+    feature looks merely mediocre rather than broken
+    (`app/lookup/product_names.py`, `tests/test_product_lookup.py`).
+
+28. **"I could not ask" must never be cached as "nobody knows".** The first
+    version treated any non-200 as a miss and wrote it to `product_name`, so a
+    single rate-limited moment would suppress a perfectly resolvable product for
+    thirty days — and the cache would look identical to one holding a real miss.
+    Only `200` and `404` are answers now; everything else raises, and raising
+    means nothing is recorded. Related: one source running out of quota must set
+    *that source* aside, not end the batch. When UPCitemdb's daily allowance was
+    spent, a single refusal abandoned the whole receipt and the groceries Open
+    Food Facts would happily have named came back blank — 5 of 20 rather than 8
+    (`app/lookup/product_names.py`, `tests/test_product_lookup.py`).
+
 ---
 
 ## 12. Version control
@@ -1209,7 +1398,9 @@ Ranked by how much they would improve the daily experience:
 8. **PDF and emailed receipts** (the Anthropic API takes PDFs as document blocks,
    so the engine change is small).
 9. **Multi-page or multi-receipt images** — currently one image is one receipt.
-10. **Code signing**, to stop the SmartScreen warning. Needs a paid certificate.
+10. **Code signing**, to stop the SmartScreen warning. §7 sets out the mechanism
+   and the options with costs; the cheapest real answer is Azure Artifact
+   Signing at about $10/month, and doing nothing is defensible.
 11. **Batch scanning via the Message Batches API** at half price, for someone
    scanning a shoebox of receipts at once.
 
@@ -1227,4 +1418,5 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.5.0 | 2026-08-31 | **Item names a person can read, and the first step towards online operation.** A till prints `CLX PLNGR`; the app now shows "Clorox Plunger & Toilet Brush with Carry Caddy" underneath it. The key was noticing that the twelve digits Walmart prints beside each line are *not a valid barcode* — it prints the first eleven and pads column twelve with a zero, so seven of eight codes on the real receipt fail UPC-A validation and every database refuses them. `app/lookup/upc.py` recomputes the check digit; Open Food Facts and UPCitemdb (both free and keyless) supply the names; a `product_name` table caches hits and misses alike (schema v4). Measured: 12 of 20 lines resolve with both services, 8 with one exhausted, and correct categories rise from 14/20 to 17/20 because the expansion feeds rule matching. Walmart's own site was tested and cannot be used — it answers a bot check, not a product. Added a Settings toggle stating exactly what leaves the machine, and a full written explanation of the SmartScreen warning (§7). Fixes §11.27–§11.28. 259 tests. |
 | 1.4.1 | 2026-08-29 | Documentation reconciled against the code (/md-renew-check, full mode). Three errors in the categorisation section: it claimed 59 seeded rules when there are 113, cited `GREAT VALUE` as a seeded example after that rule was deliberately removed in schema v2, and said rules seed "only on a fresh database" when the guard is really "no built-in rule survives" and v3 migrates new rules into existing books. Also: the handoff section still described 1.3.0, the tag list and .exe verification figures were a release behind, the 60 theme tests were missing from the verified list, and the version-control section still said no GitHub remote existed. No code changed. |

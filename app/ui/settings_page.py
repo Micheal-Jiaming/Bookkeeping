@@ -102,6 +102,19 @@ class SettingsPage:
                  anchor="w", justify="left",
                  wraplength=theme.px(420)).pack(fill="x")
 
+        self.online_lookup = tk.BooleanVar()
+        ttk.Checkbutton(
+            body, variable=self.online_lookup,
+            text="Look product names up online").pack(anchor="w", pady=(8, 0))
+        tk.Label(body, text="Turns 'CLX PLNGR' into 'Clorox Plunger & Toilet "
+                            "Brush'. Sends only the barcode printed beside an "
+                            "item — never the shop, the date or the price — to "
+                            "Open Food Facts and UPCitemdb. Answers are cached, "
+                            "so a name is fetched once and then works offline.",
+                 bg=theme["CARD"], fg=theme["DIM"], font=theme.font(8),
+                 anchor="w", justify="left",
+                 wraplength=theme.px(420)).pack(fill="x")
+
         buttons = tk.Frame(left, bg=theme["CARD"])
         buttons.pack(fill="x", padx=16, pady=14)
         Button(buttons, theme, "Save settings", self.save, kind="primary").pack(side="left")
@@ -170,6 +183,7 @@ class SettingsPage:
         self.ocr_language.set(values.get("ocr_language", "") or AUTO_LANGUAGE)
         self.tesseract.set(values.get("tesseract_cmd", ""))
         self.auto_confirm.set(values.get("auto_confirm_clean", "0") == "1")
+        self.online_lookup.set(values.get("online_lookup", "1") == "1")
         self.api_key.set("")
         masked = values.get("anthropic_api_key") or ""
         self.key_hint.configure(
@@ -223,6 +237,7 @@ class SettingsPage:
                             else self.ocr_language.get().strip(),
             "tesseract_cmd": self.tesseract.get().strip(),
             "auto_confirm_clean": "1" if self.auto_confirm.get() else "0",
+            "online_lookup": "1" if self.online_lookup.get() else "0",
         }
         typed = self.api_key.get().strip()
         if typed:
