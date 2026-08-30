@@ -99,15 +99,30 @@ def acquire_lock(data_dir: Path) -> bool:
     return True
 
 
-def report_fatal(title: str, message: str) -> None:
-    """Show a startup failure even when there is no console to print to."""
-    log.error("%s: %s", title, message)
+MB_ICONERROR = 0x10
+MB_ICONINFORMATION = 0x40
+
+
+def report_startup(title: str, message: str, *, fatal: bool = True) -> None:
+    """Show a startup message even when there is no console to print to.
+
+    ``fatal`` decides the icon and the log level together, and the distinction
+    is not cosmetic. Refusing to open a second window is the guard doing its
+    job, not a failure: dressing it in the same red cross as a crash made a
+    routine message look alarming, and logging it at ERROR meant the log
+    recorded a fault every time the application did the right thing. That
+    matters beyond tidiness -- "are there any ERROR lines in the log" is the
+    quickest way to find out whether this program has ever actually broken.
+    """
+    (log.error if fatal else log.info)("%s: %s", title, message)
     if sys.stderr is not None:
         print(f"{title}: {message}", file=sys.stderr)
     try:
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(None, message, f"Bookkeeping — {title}", 0x10)
+        ctypes.windll.user32.MessageBoxW(
+            None, message, f"Bookkeeping — {title}",
+            MB_ICONERROR if fatal else MB_ICONINFORMATION)
     except Exception:
         pass
 
@@ -118,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         data_dir = paths.choose_data_dir(args.data_dir)
     except RuntimeError as exc:
-        report_fatal("Cannot start", str(exc))
+        report_startup("Cannot start", str(exc))
         return 2
 
     log_path = setup_logging(data_dir)
@@ -131,12 +146,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not args.allow_second_window and not acquire_lock(data_dir):
-        report_fatal(
+        report_startup(
             "Already running",
             "Bookkeeping is already open for these books:\n\n"
             f"{data_dir}\n\n"
-            "Switch to the window that is already open. (Use "
-            "--allow-second-window if you really do want two.)")
+            "Switch to the window that is already open.",
+            fatal=False)
+        # The override belongs in the log, not in a dialog: it means nothing to
+        # somebody who has just double-clicked the icon twice.
+        log.info("Pass --allow-second-window to open a second window on purpose.")
         return 0
 
     log.info("Bookkeeping %s starting (data: %s, log: %s)",
@@ -147,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         # A traceback in a windowed build would otherwise be lost completely.
         detail = traceback.format_exc()
         log.error("Unhandled error in the interface:\n%s", detail)
-        report_fatal(
+        report_startup(
             "Unexpected error",
             "Bookkeeping hit an unexpected problem and has to close.\n\n"
             f"{detail.strip().splitlines()[-1]}\n\n"
