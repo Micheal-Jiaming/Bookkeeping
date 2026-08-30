@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from tkinter import ttk
 
 from .. import store
+from ..i18n import t
 from ..money import from_cents
 from .theme import Button, Card, entry, field_label
 
@@ -54,26 +55,26 @@ class ReportsPage:
 
         # Packed first so it keeps its space when the window is narrow; pack
         # order, not side, decides who gets squeezed.
-        Button(bar, theme, "Export CSV…", self.win.export_csv,
+        Button(bar, theme, t("Export CSV…"), self.win.export_csv,
                on=theme["BG"]).pack(side="right")
 
         self.range_buttons: dict[object, tk.Button] = {}
         for label, days in RANGES:
-            button = Button(bar, theme, label, lambda d=days: self.set_range(d),
+            button = Button(bar, theme, t(label), lambda d=days: self.set_range(d),
                             on=theme["BG"])
             button.pack(side="left", padx=(0, 5))
             self.range_buttons[days] = button
 
         holder = tk.Frame(bar, bg=theme["BG"])
         holder.pack(side="left", padx=(16, 0))
-        field_label(holder, theme, "From / to (YYYY-MM-DD)", on_card=False).pack(anchor="w")
+        field_label(holder, theme, t("From / to (YYYY-MM-DD)"), on_card=False).pack(anchor="w")
         row = tk.Frame(holder, bg=theme["BG"])
         row.pack()
         self.from_var = tk.StringVar()
         self.to_var = tk.StringVar()
         entry(row, theme, width=11, textvariable=self.from_var).pack(side="left")
         entry(row, theme, width=11, textvariable=self.to_var).pack(side="left", padx=4)
-        Button(row, theme, "Apply", self.refresh, on=theme["BG"]).pack(side="left")
+        Button(row, theme, t("Apply"), self.refresh, on=theme["BG"]).pack(side="left")
 
         self.include = tk.StringVar(value=INCLUDE[0][0])
         include_box = ttk.Combobox(bar, textvariable=self.include, state="readonly",
@@ -106,7 +107,7 @@ class ReportsPage:
 
         left = Card(charts, theme)
         left.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        tk.Label(left, text="Spend by category", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(left, text=t("Spend by category"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(10, "bold"), anchor="w").pack(fill="x", padx=14,
                                                                pady=(12, 4))
         self.category_canvas = tk.Canvas(left, bg=theme["CARD"], highlightthickness=0,
@@ -119,7 +120,7 @@ class ReportsPage:
 
         month_card = Card(right, theme)
         month_card.pack(fill="both", expand=True)
-        tk.Label(month_card, text="Spend by month", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(month_card, text=t("Spend by month"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(10, "bold"), anchor="w").pack(fill="x", padx=14,
                                                                pady=(12, 4))
         self.month_canvas = tk.Canvas(month_card, bg=theme["CARD"], highlightthickness=0,
@@ -129,15 +130,15 @@ class ReportsPage:
 
         merchant_card = Card(right, theme)
         merchant_card.pack(fill="both", expand=True, pady=(10, 0))
-        tk.Label(merchant_card, text="Top merchants", bg=theme["CARD"], fg=theme["FG"],
+        tk.Label(merchant_card, text=t("Top merchants"), bg=theme["CARD"], fg=theme["FG"],
                  font=theme.font(10, "bold"), anchor="w").pack(fill="x", padx=14,
                                                                pady=(12, 4))
         self.merchant_tree = ttk.Treeview(
             merchant_card, columns=("merchant", "receipts", "amount"),
             show="headings", height=6, selectmode="none")
-        for key, label, width, anchor in (("merchant", "Merchant", 140, "w"),
-                                          ("receipts", "Receipts", 62, "e"),
-                                          ("amount", "Amount", 76, "e")):
+        for key, label, width, anchor in (("merchant", t("Merchant"), 140, "w"),
+                                          ("receipts", t("Receipts"), 62, "e"),
+                                          ("amount", t("Amount"), 76, "e")):
             self.merchant_tree.heading(key, text=label)
             self.merchant_tree.column(key, width=theme.px(width), anchor=anchor,
                                       minwidth=theme.px(50))
@@ -188,13 +189,13 @@ class ReportsPage:
         totals = self.data["totals"]
         pending = self.data["pending_review"]
         values = (
-            ("Total spend", f"${totals['spend'] or '0.00'}",
+            (t("Total spend"), f"${totals['spend'] or '0.00'}",
              f"{totals['receipts']} receipt(s)"),
-            ("Average receipt", f"${from_cents(totals['average_cents'])}",
+            (t("Average receipt"), f"${from_cents(totals['average_cents'])}",
              f"{totals['items']} line items"),
-            ("Tax paid", f"${totals['tax'] or '0.00'}", "in this period"),
-            ("Awaiting review", str(pending),
-             "not counted here" if pending else "nothing pending"),
+            (t("Tax paid"), f"${totals['tax'] or '0.00'}", t("in this period")),
+            (t("Awaiting review"), str(pending),
+             t("not counted here") if pending else t("nothing pending")),
         )
         for (label, value, sub), (label_w, value_w, sub_w) in zip(values, self.tile_labels):
             label_w.configure(text=label)
@@ -245,7 +246,7 @@ class ReportsPage:
         buckets = self.data["by_category"] if self.data else []
         width = canvas.winfo_width()
         if not buckets:
-            canvas.create_text(width / 2, 40, text="Nothing confirmed in this range yet.",
+            canvas.create_text(width / 2, 40, text=t("Nothing confirmed in this range yet."),
                                fill=theme["DIM"], font=theme.font(10))
             return
 
@@ -289,7 +290,7 @@ class ReportsPage:
         width = canvas.winfo_width()
         height = canvas.winfo_height()
         if not months:
-            canvas.create_text(width / 2, height / 2, text="No months to show yet.",
+            canvas.create_text(width / 2, height / 2, text=t("No months to show yet."),
                                fill=theme["DIM"], font=theme.font(10))
             return
 

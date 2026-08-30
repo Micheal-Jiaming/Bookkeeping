@@ -29,6 +29,11 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from .. import i18n
+
+# Segoe UI carries no Chinese glyphs, so the family follows the interface
+# language -- see app/i18n.py. Kept as a module constant for the English
+# case so nothing that reads FONT directly has to change.
 FONT = "Segoe UI"
 MONO = "Consolas"
 
@@ -156,7 +161,7 @@ class Theme:
         return max(minimum, int(round(value * self.scale)))
 
     def font(self, size: int = 10, style: str = "normal") -> tuple:
-        return (FONT, size, style)
+        return (i18n.font_family(), size, style)
 
     def mono(self, size: int = 9) -> tuple:
         return (MONO, size)

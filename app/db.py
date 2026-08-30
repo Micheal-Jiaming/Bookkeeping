@@ -23,7 +23,7 @@ from .paths import default_data_dir
 
 log = logging.getLogger("bookkeeping.db")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -125,6 +125,16 @@ CREATE TABLE IF NOT EXISTS product_name (
     upc        TEXT PRIMARY KEY,
     name       TEXT,
     source     TEXT,
+    fetched_at TEXT NOT NULL
+);
+
+-- English item name -> Chinese, for when the interface is in Chinese. Cached
+-- for the same reason product_name is: a translation never changes, and the
+-- same groceries come back week after week. A NULL zh records that the
+-- services were asked and had nothing, so the question is not asked again.
+CREATE TABLE IF NOT EXISTS translation (
+    source     TEXT PRIMARY KEY,
+    zh         TEXT,
     fetched_at TEXT NOT NULL
 );
 """
@@ -422,8 +432,13 @@ DEFAULT_SETTINGS = {
     # a scanned receipt, and the sources are free and keyless. Turning it off
     # still uses names already cached, so the app degrades rather than forgets.
     "online_lookup": "1",
+    # 1 = translate item names into Chinese while scanning. Only ever acts
+    # when the interface language is Chinese, so an English user pays no
+    # network cost for text they will never see.
+    "translate_items": "1",
     # Interface state. Kept here rather than in a separate config file so a
     # portable copy carries its own appearance with the books.
+    "language": "en",                 # en | zh -- see app/i18n.py
     "theme": "dark",                  # any key of app.ui.theme.THEMES
     "window_geometry": "",            # last size and position, e.g. 1180x760+120+80
     "last_page": "receipts",
@@ -514,6 +529,10 @@ def _migrate(db: sqlite3.Connection, previous: int) -> None:
     # CREATE TABLE IF NOT EXISTS in SCHEMA, the setting through _seed_settings,
     # which inserts any key missing from DEFAULT_SETTINGS. The version is still
     # bumped so that user_version describes the shape the code expects.
+
+    # Version 6 adds the translation cache and the translate_items setting.
+    # Like version 4 it needs no clause: the table arrives through the
+    # CREATE TABLE IF NOT EXISTS above and the setting through _seed_settings.
 
     if previous < 5:
         # Version 5 adds ordinary grocery nouns and supermarket merchants. Two
