@@ -495,3 +495,31 @@ def test_a_cash_rounding_line_is_not_a_purchase():
         "ROUNDING 0.04\n"
         "CHANGE DUE 1.58\n")
     assert [i.description for i in receipt.items] == ["GV WHL MILK"]
+
+
+def test_a_summary_word_may_not_hide_inside_a_product_name():
+    """CASHEWS contains CASH, and was being discarded as a summary line.
+
+    Plain substring matching threw the line away and its money with it -- the
+    receipt simply came up short, with nothing to say why. Every short word on
+    the summary list has the same trap waiting in it, so the match is on whole
+    words (see also 11.22, the same trap in the categorisation rules).
+    """
+    receipt = parse_receipt_text(
+        "Walmart\n"
+        "CASHEWS 012345678905 4.99 X\n"
+        "SUBTOTAL 4.99\n"
+        "CASH TEND 10.00\n"
+        "TOTAL 4.99\n")
+    assert [(i.description, i.amount) for i in receipt.items] == [("CASHEWS", "4.99")]
+    assert receipt.total == "4.99"
+
+
+def test_the_real_summary_lines_are_still_recognised():
+    """The whole-word rule must not cost the lines it was protecting."""
+    from app.extract.receipt_text import _is_summary_line
+
+    for line in ("CASH TEND 200.00", "SUBTOTAL 141.94", "T O T A L $65.32",
+                 "TC# 2596 9185 9980", "REF # U1168W210491", "AMOUNT DUE 65.32",
+                 "MASTERCARD- 3367", "B-TAXABLE @5.500% 0.15", "18 ITEMS"):
+        assert _is_summary_line(line), line

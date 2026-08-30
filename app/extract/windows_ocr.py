@@ -58,8 +58,6 @@ log = logging.getLogger("bookkeeping.ocr")
 # whose arithmetic checks out; anything less certain scores below it.
 MAX_REPORTED_CONFIDENCE = 0.5
 
-# docTR groups words into a line when the gap between vertical centres is under
-# half the median word height (doctr/models/builder.py, `_resolve_lines`).
 # Windows OCR is read twice, at the stored size and at this long edge, and the
 # two readings are combined. Neither size wins outright, which is the whole
 # point:
@@ -144,6 +142,10 @@ def merge_readings(primary, secondary):
     return primary
 
 
+# docTR groups words into a line when the gap between vertical centres is under
+# half the median word height (doctr/models/builder.py, `_resolve_lines`). A
+# fraction of the text size rather than a pixel count is what survives photos
+# taken at different distances.
 ROW_TOLERANCE = 0.5
 
 # The three ways Windows OCR mangles a printed price, in the order they have to
