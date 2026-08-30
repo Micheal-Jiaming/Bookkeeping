@@ -474,10 +474,16 @@ class ReviewPane:
         # The printed name stays in the editable field because it is what the
         # receipt actually says. The expansion goes underneath it, where it
         # answers "what *is* EQJELLUBE8OZ?" without overwriting the evidence.
+        # "from barcode" is not decoration. The name came from a catalogue,
+        # keyed on a number the OCR read off a photograph, and one misread digit
+        # produces a confidently wrong product -- a toothpaste on the test
+        # receipt came back as an Audi cylinder head gasket. Saying where the
+        # name came from lets a reviewer weigh it instead of trusting it.
         readable = (item.get("raw_description") or "").strip()
         if readable:
-            tk.Label(row, text=readable, bg=theme["CARD"], fg=theme["DIM"],
-                     font=theme.font(8), anchor="w").pack(fill="x", padx=(6, 0))
+            tk.Label(row, text=f"from barcode: {readable}", bg=theme["CARD"],
+                     fg=theme["DIM"], font=theme.font(8),
+                     anchor="w").pack(fill="x", padx=(6, 0))
 
         record = {
             "frame": row, "description": description, "quantity": quantity,
