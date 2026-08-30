@@ -73,6 +73,54 @@ def test_a_receipt_line_with_no_sku_is_skipped():
     assert names_for_skus([None, ""]) == {}
 
 
+# --- codes from the two receipts of 2026-08-29 -----------------------------
+
+@pytest.mark.parametrize("printed, expected", [
+    ("036000554800", "036000554809"),   # COTT CLN 12M
+    ("756809105660", "756809105667"),   # an item with no printed name
+    ("850043215670", "850043215677"),   # HARDWHOOKS
+    ("631656716810", "631656716818"),   # SS CREA FP
+    ("194346193890", "194346193899"),   # BG ALM UNVAN
+    ("078742089640", "078742089645"),   # GV CC IC
+    ("078742002830", "078742002835"),   # GVCORNSTARCH
+])
+def test_the_second_receipts_codes_are_repaired_too(printed, expected):
+    assert barcode_for(printed) == expected
+
+
+def test_the_true_upc_is_recovered_from_an_unnamed_item():
+    """A receipt printed both forms of one barcode, which confirms the rule.
+
+    The line read "756809105667 756809105660": the true UPC, whose check digit
+    really is 7, beside the same code with that digit replaced by a zero. The
+    repair turns the second into the first.
+    """
+    assert is_valid("756809105667")
+    assert not is_valid("756809105660")
+    assert barcode_for("756809105660") == "756809105667"
+
+
+@pytest.mark.parametrize("code, why", [
+    ("000787423909", "a Maine bottle deposit, not a product"),
+    ("000000004612", "a produce PLU padded out to twelve columns"),
+])
+def test_a_code_that_is_not_zero_padded_is_left_alone(code, why):
+    """Rebuilding these would be a guess, and a lucky guess is the bad case.
+
+    The trailing zero is the evidence that a code was truncated. Without it
+    there is nothing to say the number is a barcode at all, and a rebuilt code
+    that happens to exist would put somebody else's product on the line.
+    """
+    assert not is_valid(code)
+    assert barcode_for(code) is None, why
+
+
+def test_a_plu_code_is_never_sent_to_a_barcode_database():
+    """No GS1 company prefix starts with six zeros, so this cannot resolve."""
+    assert barcode_for("000000004011") is None      # bananas
+    assert barcode_for("000000004612") is None      # ginger root
+
+
 # --- the two sources -------------------------------------------------------
 
 def _scripted(monkeypatch, answers: dict[str, tuple[int | None, str]]):
