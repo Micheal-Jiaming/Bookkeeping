@@ -469,3 +469,30 @@ def test_the_settings_page_reports_engine_availability(window):
     )
     assert "claude" in text and "API key" in text
     assert "tesseract" in text
+
+
+def test_correcting_an_item_name_drops_its_barcode_expansion(window):
+    """A looked-up name is only as good as the barcode the OCR read.
+
+    One misread digit produces a confident wrong answer that no check can catch
+    (11.31) -- a toothpaste came back as an Audi cylinder head gasket. Editing
+    the line is the reviewer saying the machine misread it, so the machine's
+    other guess about that line should not survive.
+    """
+    window.add_manual()
+    review = window.pages["receipts"].review
+    review._add_item_row(review.items_holder, {
+        "description": "AIM TP 5.5OZ",
+        "raw_description": "Audi A5 Cylinder Head Gasket",
+        "amount_cents": 98,
+    })
+    row = review._item_rows[-1]
+
+    # Untouched, the expansion stays: it is often right, and usually useful.
+    kept = review._collect().items[-1]
+    assert kept.raw_description == "Audi A5 Cylinder Head Gasket"
+
+    row["description"].set("AIM TOOTHPASTE")
+    corrected = review._collect().items[-1]
+    assert corrected.description == "AIM TOOTHPASTE"
+    assert corrected.raw_description is None, "the wrong expansion should go too"

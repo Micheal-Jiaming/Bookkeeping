@@ -533,6 +533,7 @@ class ReviewPane:
             "amount": amount, "combo": combo, "source": source,
             "unit_price_cents": item.get("unit_price_cents"),
             "sku": item.get("sku"), "raw_description": item.get("raw_description"),
+            "original_description": item.get("description", ""),
             "is_discount": bool(item.get("is_discount")),
             "taxable": item.get("taxable"),
             "original_category_id": item.get("category_id"),
@@ -578,14 +579,26 @@ class ReviewPane:
                 quantity = float(quantity_text) if quantity_text else None
             except ValueError:
                 quantity = None
+            # Correcting the printed name drops the barcode expansion with it.
+            # A looked-up name comes from a number the OCR read off a
+            # photograph, and one misread digit produces a confident wrong
+            # answer that no check can catch (11.31) -- on the test receipt a
+            # toothpaste came back as an Audi cylinder head gasket. Editing the
+            # line is the reviewer saying the machine got it wrong, so the
+            # machine's other guess about that line goes too.
+            typed = record["description"].get()
+            expansion = record["raw_description"]
+            if typed.strip() != (record["original_description"] or "").strip():
+                expansion = None
+
             items.append(store.ItemEdit(
-                description=record["description"].get(),
+                description=typed,
                 quantity=quantity,
                 unit_price_cents=record["unit_price_cents"],
                 amount_cents=to_cents(record["amount"].get()),
                 category_id=chosen_id,
                 category_source=source,
-                raw_description=record["raw_description"],
+                raw_description=expansion,
                 sku=record["sku"],
                 is_discount=record["is_discount"],
                 taxable=record["taxable"],

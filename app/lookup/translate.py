@@ -53,6 +53,26 @@ _pace_lock = threading.Lock()
 _last_call: dict[str, float] = {}
 
 
+# Receipt shorthand a general-purpose translator reliably gets wrong, because it
+# has no idea it is reading a till roll. Checked before either service.
+#
+# "ME DEPOSIT" is the example that earns this table: ME is Maine, and the line
+# is the state's bottle deposit. Google reads it as the pronoun and returns
+# 我存款 -- "my deposit" -- which is confident, fluent and wrong. No amount of
+# tuning fixes that, because the English really is ambiguous; only knowing it
+# came off a receipt resolves it.
+#
+# Keep this list to terms actually seen on a real receipt and actually
+# mistranslated. It is not a place to pre-empt problems nobody has had.
+GLOSSARY: dict[str, str] = {
+    "ME DEPOSIT": "缅因州瓶罐押金",
+    "BEDINABAG": "床上用品套装",
+    "ROUNDING": "现金找零舍入",
+    "MANAGER COUPON": "经理优惠券",
+    "ITEMS SOLD": "已售件数",
+}
+
+
 class Unavailable(Exception):
     """A service could not answer; nothing may be cached about this text."""
 
@@ -129,6 +149,10 @@ def translate_one(text: str) -> str | None:
     Raises ``Unavailable`` when no service could be reached, so that a network
     problem is never written into the cache as "this has no translation".
     """
+    known = GLOSSARY.get(text.strip().upper())
+    if known:
+        return known
+
     problems: list[str] = []
     answered = False
     for source in SOURCES:
@@ -160,13 +184,26 @@ def chinese_for(texts: list[str], *, enabled: bool = True) -> dict[str, str]:
     if not wanted:
         return {}
 
+    # The glossary outranks the cache, not just the services. A term added to it
+    # is usually added *because* a wrong machine translation is already stored,
+    # and looking at the cache first would keep serving the wrong answer for
+    # ever -- which is exactly what happened to "ME DEPOSIT".
+    out: dict[str, str] = {}
+    for text in list(wanted):
+        known = GLOSSARY.get(text.upper())
+        if known:
+            out[text] = known
+            wanted.discard(text)
+    if not wanted:
+        return out
+
     with connect() as db:
         holes = ",".join("?" * len(wanted))
         rows = db.execute(
             f"SELECT source, zh FROM translation WHERE source IN ({holes})",
             tuple(wanted)).fetchall()
     known = {row["source"]: row["zh"] for row in rows}
-    out = {source: zh for source, zh in known.items() if zh}
+    out.update({source: zh for source, zh in known.items() if zh})
 
     if enabled:
         deadline = time.monotonic() + BATCH_BUDGET
