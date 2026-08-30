@@ -23,7 +23,7 @@ from .paths import default_data_dir
 
 log = logging.getLogger("bookkeeping.db")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -228,6 +228,114 @@ RULES_ADDED_IN_V3: list[tuple[str, str, str, int]] = [
     ("DEPOSIT", "Fees & Taxes", "description", 40),
 ]
 
+
+# Added in schema version 5, after two Aldi receipts categorised 1 item out of
+# 18. The seeded rules until then were shaped by Walmart's abbreviations
+# ("GV", "SPGE", "CLX") and by a handful of pantry staples. Aldi prints plain
+# English -- "Green Peppers", "Broccoli Crowns", "Flat Leaf Spinach" -- which
+# matched nothing at all, so a whole grocery shop landed in Uncategorized.
+#
+# These are ordinary nouns rather than brands, which is what makes them safe to
+# seed at all (see the GREAT VALUE removal above). Two rules from 11.22 were
+# applied while choosing them:
+#
+#   * A pattern must not hide inside an unrelated word. EGGS is seeded and EGG
+#     is not, because LEGGINGS contains EGG. BEANS and not BEAN, because of
+#     BEANIE. RICE, HAM, OATS and CREAM were all considered and rejected --
+#     they sit inside PRICE, SHAMPOO, COATS and SUNSCREEN.
+#   * A pattern must name a category, not a product line.
+#
+# Ordering note: these are all priority 60, the same as the other description
+# rules, so nothing here outranks a rule the user wrote themselves.
+RULES_ADDED_IN_V5: list[tuple[str, str, str, int]] = [
+    # Fresh produce -- the largest gap, and the bulk of an Aldi receipt.
+    ("PEPPER", "Groceries", "description", 60),
+    ("ONION", "Groceries", "description", 60),
+    ("SPINACH", "Groceries", "description", 60),
+    ("BROCCOLI", "Groceries", "description", 60),
+    ("MUSHROOM", "Groceries", "description", 60),
+    ("MUSHRM", "Groceries", "description", 60),
+    ("LETTUCE", "Groceries", "description", 60),
+    ("TOMATO", "Groceries", "description", 60),
+    ("POTATO", "Groceries", "description", 60),
+    ("CARROT", "Groceries", "description", 60),
+    ("CUCUMBER", "Groceries", "description", 60),
+    ("AVOCADO", "Groceries", "description", 60),
+    ("CELERY", "Groceries", "description", 60),
+    ("CABBAGE", "Groceries", "description", 60),
+    ("ZUCCHINI", "Groceries", "description", 60),
+    ("SQUASH", "Groceries", "description", 60),
+    ("GARLIC", "Groceries", "description", 60),
+    ("GINGER", "Groceries", "description", 60),
+    ("CILANTRO", "Groceries", "description", 60),
+    ("JALAPENO", "Groceries", "description", 60),
+    ("GRAPE", "Groceries", "description", 60),
+    ("MANDARIN", "Groceries", "description", 60),
+    ("ORANGE", "Groceries", "description", 60),
+    ("APPLE", "Groceries", "description", 60),
+    ("LEMON", "Groceries", "description", 60),
+    ("MELON", "Groceries", "description", 60),
+    ("PEACH", "Groceries", "description", 60),
+    ("BERRIES", "Groceries", "description", 60),
+    ("RASPBERR", "Groceries", "description", 60),
+    ("BLUEBERR", "Groceries", "description", 60),
+    ("STRAWBERR", "Groceries", "description", 60),
+    # Chilled and pantry staples the original list missed.
+    ("BEANS", "Groceries", "description", 60),
+    ("CORN", "Groceries", "description", 60),
+    ("RAMEN", "Groceries", "description", 60),
+    ("NOODLE", "Groceries", "description", 60),
+    ("PASTA", "Groceries", "description", 60),
+    ("FLOUR", "Groceries", "description", 60),
+    ("SUGAR", "Groceries", "description", 60),
+    ("CHEESE", "Groceries", "description", 60),
+    ("BUTTER", "Groceries", "description", 60),
+    ("GRK YOG", "Groceries", "description", 60),
+    ("JUICE", "Groceries", "description", 60),
+    ("SOUP", "Groceries", "description", 60),
+    ("SAUCE", "Groceries", "description", 60),
+    ("TORTILLA", "Groceries", "description", 60),
+    ("BAGEL", "Groceries", "description", 60),
+    ("LOAF", "Groceries", "description", 60),
+    ("SOURDOUGH", "Groceries", "description", 60),
+    ("CRACKER", "Groceries", "description", 60),
+    ("OATMEAL", "Groceries", "description", 60),
+    ("GRANOLA", "Groceries", "description", 60),
+    ("SALAD", "Groceries", "description", 60),
+    ("ICE CREAM", "Groceries", "description", 60),
+    # Meat and fish.
+    ("MEAT", "Groceries", "description", 60),
+    ("STEW", "Groceries", "description", 60),
+    ("BEEF", "Groceries", "description", 60),
+    ("PORK", "Groceries", "description", 60),
+    ("BACON", "Groceries", "description", 60),
+    ("SAUSAGE", "Groceries", "description", 60),
+    ("TURKEY", "Groceries", "description", 60),
+    ("SALMON", "Groceries", "description", 60),
+    ("SHRIMP", "Groceries", "description", 60),
+    ("TUNA", "Groceries", "description", 60),
+    # Disposables, which a grocery shop mixes in with the food.
+    ("PAPER BOWL", "Household", "description", 60),
+    ("PAPER PLATE", "Household", "description", 60),
+    ("PAPER TOWEL", "Household", "description", 60),
+    ("NAPKIN", "Household", "description", 60),
+    ("TRASH BAG", "Household", "description", 60),
+    ("FOIL", "Household", "description", 60),
+    # Merchant defaults, weakest of all (priority 200), so they only apply when
+    # nothing else matched. Hannaford, Shaw's and Market Basket are the chains
+    # around the address on these receipts.
+    ("ALDI", "Groceries", "merchant", 200),
+    ("TRADER JOE", "Groceries", "merchant", 200),
+    ("HANNAFORD", "Groceries", "merchant", 200),
+    ("SHAW", "Groceries", "merchant", 200),
+    ("MARKET BASKET", "Groceries", "merchant", 200),
+    ("WHOLE FOODS", "Groceries", "merchant", 200),
+    ("KROGER", "Groceries", "merchant", 200),
+    ("SAFEWAY", "Groceries", "merchant", 200),
+    ("PUBLIX", "Groceries", "merchant", 200),
+    ("WEGMANS", "Groceries", "merchant", 200),
+]
+
 BUILTIN_RULES: list[tuple[str, str, str, int]] = [
     # (pattern, category, field, priority)
     #
@@ -394,31 +502,8 @@ def _migrate(db: sqlite3.Connection, previous: int) -> None:
 
     if previous < 3:
         # Version 3 adds the abbreviation and brand rules the offline OCR engine
-        # needs. _seed_rules only ever fires on an empty database -- deliberately,
-        # so that rules the user deleted stay deleted -- which means existing
-        # books would otherwise never see these. A pattern the user already has,
-        # built-in or their own, is left exactly as it is.
-        ids = {
-            row["name"]: row["id"]
-            for row in db.execute("SELECT id, name FROM category").fetchall()
-        }
-        added = 0
-        for pattern, category, field, priority in RULES_ADDED_IN_V3:
-            category_id = ids.get(category)
-            if category_id is None:
-                continue
-            clash = db.execute(
-                "SELECT 1 FROM category_rule WHERE field = ? AND pattern = ?",
-                (field, pattern),
-            ).fetchone()
-            if clash:
-                continue
-            db.execute(
-                "INSERT INTO category_rule (field, match_type, pattern, category_id, "
-                "priority, enabled, is_builtin) VALUES (?, 'contains', ?, ?, ?, 1, 1)",
-                (field, pattern, category_id, priority),
-            )
-            added += 1
+        # needs -- see RULES_ADDED_IN_V3 for why they were necessary.
+        added = _add_missing_rules(db, RULES_ADDED_IN_V3)
         if added:
             log.info("Added %d built-in categorisation rules for abbreviated "
                      "item names", added)
@@ -430,6 +515,48 @@ def _migrate(db: sqlite3.Connection, previous: int) -> None:
     # which inserts any key missing from DEFAULT_SETTINGS. The version is still
     # bumped so that user_version describes the shape the code expects.
 
+    if previous < 5:
+        # Version 5 adds ordinary grocery nouns and supermarket merchants. Two
+        # Aldi receipts categorised 1 item out of 18 because every seeded rule
+        # was shaped by Walmart's abbreviations; see RULES_ADDED_IN_V5.
+        added = _add_missing_rules(db, RULES_ADDED_IN_V5)
+        if added:
+            log.info("Added %d built-in categorisation rules for plain-English "
+                     "grocery names", added)
+
+
+def _add_missing_rules(
+    db: sqlite3.Connection, rules: list[tuple[str, str, str, int]]
+) -> int:
+    """Seed rules into an existing database, skipping any the user already has.
+
+    ``_seed_rules`` only fires when no built-in rule survives -- deliberately, so
+    that rules the user deleted stay deleted -- which means a rule added in a
+    later version would never reach books that already exist. A pattern already
+    present, whether built-in or the user's own, is left exactly as it is.
+    """
+    ids = {
+        row["name"]: row["id"]
+        for row in db.execute("SELECT id, name FROM category").fetchall()
+    }
+    added = 0
+    for pattern, category, field, priority in rules:
+        category_id = ids.get(category)
+        if category_id is None:
+            continue
+        clash = db.execute(
+            "SELECT 1 FROM category_rule WHERE field = ? AND pattern = ?",
+            (field, pattern),
+        ).fetchone()
+        if clash:
+            continue
+        db.execute(
+            "INSERT INTO category_rule (field, match_type, pattern, category_id, "
+            "priority, enabled, is_builtin) VALUES (?, 'contains', ?, ?, ?, 1, 1)",
+            (field, pattern, category_id, priority),
+        )
+        added += 1
+    return added
 
 def _seed_categories(db: sqlite3.Connection) -> None:
     for name, color, order in BUILTIN_CATEGORIES:
