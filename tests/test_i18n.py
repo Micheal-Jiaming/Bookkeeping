@@ -203,3 +203,40 @@ def test_the_pipeline_only_translates_for_a_chinese_interface(books, monkeypatch
     assert calls == []
     assert books["pipeline"]._translate_item_names(result, {"language": "zh"}) == 1
     assert calls, "a Chinese interface should translate"
+
+
+# --- the glossary ----------------------------------------------------------
+
+def test_the_glossary_beats_the_machine_translator(monkeypatch):
+    """ME is Maine, not the pronoun, and only a receipt knows that.
+
+    Google returns 我存款 -- "my deposit" -- which is fluent, confident and
+    wrong. The English really is ambiguous, so no tuning fixes it; the glossary
+    is the only place the context can live.
+    """
+    calls = _scripted(monkeypatch, {"clients5": (200, json.dumps(["我存款"]))})
+    assert translate.translate_one("ME DEPOSIT") == "缅因州瓶罐押金"
+    assert calls == [], "a known term should not be sent to a translator at all"
+
+
+def test_the_glossary_ignores_case_and_padding(monkeypatch):
+    _scripted(monkeypatch, {"clients5": (200, json.dumps(["nope"]))})
+    assert translate.translate_one("  me deposit ") == "缅因州瓶罐押金"
+
+
+def test_an_unknown_term_still_goes_to_the_translator(monkeypatch):
+    calls = _scripted(monkeypatch, {"clients5": (200, json.dumps(["大鸡蛋"]))})
+    assert translate.translate_one("Large Eggs") == "大鸡蛋"
+    assert len(calls) == 1
+
+
+def test_the_glossary_outranks_a_wrong_answer_already_cached(books, monkeypatch):
+    """A term joins the glossary *because* the wrong answer is already stored.
+
+    Looking at the cache first would keep serving 我存款 for ever, which is
+    exactly what happened before this was fixed.
+    """
+    _scripted(monkeypatch, {"clients5": (200, json.dumps(["我存款"]))})
+    translate._remember([("ME DEPOSIT", "我存款")])          # the bad answer, cached
+    assert chinese_for(["ME DEPOSIT"]) == {"ME DEPOSIT": "缅因州瓶罐押金"}
+    assert chinese_for(["ME DEPOSIT"], enabled=False) == {"ME DEPOSIT": "缅因州瓶罐押金"}
