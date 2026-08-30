@@ -113,16 +113,28 @@ _SUMMARY_WORDS = (
     # Aldi's summary block and card trailer.
     "TAXABLE", "AMOUNT", "ITEMS", "APPROVED", "TRACE", "CASHIER",
 )
-# Whole-word matching: a summary word may not sit inside a longer word. The
-# lookarounds are on letters only, so "TC#" and "REF #" still match, while
-# CASH no longer matches CASHEWS.
 # Lines that hand over money, as opposed to the rest of the summary block.
+# TEND is here for Walmart's "MCARD TEND" and "CASH TEND".
 _PAYMENT_WORDS = ("MASTERCARD", "VISA", "AMEX", "DISCOVER", "DEBIT", "CREDIT",
                   "CASH", "TEND", "PAYMENT", "CARD")
 
-_SUMMARY_RE = re.compile(
-    r"(?<![A-Z])(?:" + "|".join(re.escape(w.upper()) for w in _SUMMARY_WORDS)
-    + r")(?![A-Z])")
+
+def _whole_words(words) -> re.Pattern[str]:
+    """Match any of ``words``, but never inside a longer word.
+
+    Both of these lists are short English words that occur inside ordinary
+    groceries, and matching them as plain substrings has now cost real line
+    items twice: CASHEWS contains CASH, CHICKEN TENDERS contains TEND, CARDAMOM
+    contains CARD, Q-TIPS contains TIP. The lookarounds are on letters only, so
+    "TC#" and "REF #" still match while "CASHEWS" does not.
+    """
+    return re.compile(
+        r"(?<![A-Z])(?:" + "|".join(re.escape(w.upper()) for w in words)
+        + r")(?![A-Z])")
+
+
+_SUMMARY_RE = _whole_words(_SUMMARY_WORDS)
+_PAYMENT_RE = _whole_words(_PAYMENT_WORDS)
 
 _DISCOUNT_WORDS = (
     "COUPON", "DISCOUNT", "ROLLBACK", "MARKDOWN", "PROMO", "VOID", "REFUND",
@@ -326,8 +338,7 @@ def _find_items(
     # unnamed item that happens to cost the same as the tax gets thrown away,
     # which is a real receipt losing a real purchase to a coincidence.
     for line in lines:
-        upper = line.upper()
-        if any(word in upper for word in _PAYMENT_WORDS):
+        if _PAYMENT_RE.search(line.upper()):
             amount = _trailing_amount_text(line)
             if amount:
                 payment_amounts.add(amount.strip("$ "))

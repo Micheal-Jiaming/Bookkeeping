@@ -523,3 +523,32 @@ def test_the_real_summary_lines_are_still_recognised():
                  "TC# 2596 9185 9980", "REF # U1168W210491", "AMOUNT DUE 65.32",
                  "MASTERCARD- 3367", "B-TAXABLE @5.500% 0.15", "18 ITEMS"):
         assert _is_summary_line(line), line
+
+
+def test_a_food_name_is_not_mistaken_for_a_payment_line():
+    """The same substring trap as 11.44, one list over, and it cost a line.
+
+    A payment line's amount can disqualify an unnamed item (11.34/11.45).
+    Matching the payment words as substrings meant CHICKEN TENDERS matched
+    TEND, so its 8.99 disqualified a genuine unnamed item priced the same, and
+    the item vanished with no complaint. CASHEWS matches CASH and CARDAMOM
+    matches CARD for the same reason.
+    """
+    receipt = parse_receipt_text(
+        "Walmart\n"
+        "CHICKEN TENDERS 012345678905 8.99 X\n"
+        "LOOSE PRODUCE 8.99 X\n"
+        "GV WHL MILK 007874203912 3.24 X\n"
+        "SUBTOTAL 21.22\n"
+        "TOTAL 21.22\n")
+    assert [i.description for i in receipt.items] == [
+        "CHICKEN TENDERS", "LOOSE PRODUCE", "GV WHL MILK"]
+
+
+def test_the_real_payment_lines_are_still_recognised():
+    """Whole-word matching must not cost the tender lines it exists to find."""
+    from app.extract.receipt_text import _PAYMENT_RE
+
+    for line in ("MCARD TEND 24.81", "CASH TEND 200.00", "CREDIT CARD $ 17.43",
+                 "MASTERCARD- 3367 I 1", "VISA TEND 21.91"):
+        assert _PAYMENT_RE.search(line.upper()), line
