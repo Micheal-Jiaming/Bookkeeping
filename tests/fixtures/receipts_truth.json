@@ -1,0 +1,164 @@
+{
+  "_comment": [
+    "Ground truth: what a human confirmed is printed on each photograph.",
+    "This is NOT the baseline. tests/fixtures/accuracy_baseline.json holds what",
+    "the code currently produces; this file holds what is actually correct, and",
+    "the two must never be merged - see tools/accuracy.py.",
+    "",
+    "header: a key present with value null means VERIFIED ABSENT. A key that is",
+    "missing means nobody checked that field, and it is not scored.",
+    "lines: null means not transcribed yet, which is not an empty receipt.",
+    "sha256: the photograph this record describes. If the image changes, the",
+    "harness says so instead of scoring against the wrong paper.",
+    "",
+    "No card number, address or transaction code appears here, and the",
+    "photographs themselves stay out of git."
+  ],
+  "receipts": {
+    "Walmart1.jpg": {
+      "verified_by": "human",
+      "sha256": "9904432455ff54933b80394223765689b30a5837bb29f252b7cbfb0780697f3a",
+      "note": "Photographed with the top out of frame, so merchant and date are verified ABSENT rather than unchecked. Transcription is shared with tests/test_real_receipt.py and self-checks four ways.",
+      "header": {
+        "merchant": null,
+        "purchased_at": null,
+        "subtotal": "141.94",
+        "tax": "7.50",
+        "total": "149.44"
+      },
+      "lines": [
+        [
+          "BEDINABAG",
+          "29.72"
+        ],
+        [
+          "GV 1G SP",
+          "1.37"
+        ],
+        [
+          "ME DEPOSIT",
+          "0.05"
+        ],
+        [
+          "GV 1G SP",
+          "1.37"
+        ],
+        [
+          "ME DEPOSIT",
+          "0.05"
+        ],
+        [
+          "GV TWIST MOP",
+          "10.88"
+        ],
+        [
+          "COKE",
+          "3.04"
+        ],
+        [
+          "ME DEPOSIT",
+          "0.05"
+        ],
+        [
+          "HANGERS",
+          "2.98"
+        ],
+        [
+          "HS SH CLS8.5",
+          "3.97"
+        ],
+        [
+          "DOVE BW 11OZ",
+          "5.47"
+        ],
+        [
+          "AIM TP 5.5OZ",
+          "0.98"
+        ],
+        [
+          "GV TOASTED O",
+          "2.47"
+        ],
+        [
+          "DWN EZS 22Z",
+          "3.83"
+        ],
+        [
+          "CLX PLNGR",
+          "17.76"
+        ],
+        [
+          "GV AMMONIA",
+          "2.94"
+        ],
+        [
+          "FRENCH BREAD",
+          "1.47"
+        ],
+        [
+          "FRENCH BREAD",
+          "1.47"
+        ],
+        [
+          "PROTEINSUPPL",
+          "23.18"
+        ],
+        [
+          "GV HD SPGE 4",
+          "2.18"
+        ],
+        [
+          "TIDE PODS 57",
+          "17.94"
+        ],
+        [
+          "ST BUCKET",
+          "2.86"
+        ],
+        [
+          "GAIN",
+          "0.97"
+        ],
+        [
+          "EQJELLUBE8OZ",
+          "4.94"
+        ]
+      ]
+    },
+    "ALDI1.jpg": {
+      "verified_by": "unverified",
+      "sha256": "af8d4e3e239a2375abcb48f1a4c3eda3689be214b983712ab8ed86bb48dff3a0",
+      "note": "Nobody has transcribed this receipt yet: self-checks only.",
+      "header": {},
+      "lines": null
+    },
+    "ALDI1_new.jpg": {
+      "verified_by": "unverified",
+      "sha256": "e43cf02b7b01ca9a96c13c19994834d4c261b98345fa1c5545d7d04567e6f288",
+      "note": "Nobody has transcribed this receipt yet: self-checks only.",
+      "header": {},
+      "lines": null
+    },
+    "ALDI2.jpg": {
+      "verified_by": "unverified",
+      "sha256": "ad945e852be8b4e5ae00dbaab0dcd6713c62ff81116e21d65f1acf3f353aa2a1",
+      "note": "Nobody has transcribed this receipt yet: self-checks only.",
+      "header": {},
+      "lines": null
+    },
+    "Walmart2.jpg": {
+      "verified_by": "unverified",
+      "sha256": "7d0128b6829341fdf259cd5dc5ab0ca38a3d47084134a8967ac98047e53a187c",
+      "note": "Nobody has transcribed this receipt yet: self-checks only.",
+      "header": {},
+      "lines": null
+    },
+    "Walmart3.jpg": {
+      "verified_by": "unverified",
+      "sha256": "19793770e6ab4dc06b8225da7934826aaf5849d23c8ac2730c31dc42bfcab80f",
+      "note": "Nobody has transcribed this receipt yet: self-checks only.",
+      "header": {},
+      "lines": null
+    }
+  }
+}

@@ -872,12 +872,13 @@ Things in the spec that must not be "tidied up":
 
 ### The development tools
 
-Four scripts in `tools\` exist because of specific things that went wrong. They
+Seven scripts in `tools\` exist because of specific things that went wrong. They
 are part of the project, not scratch work: a future session that needs to check
 the build, look at the interface, or exercise the vision path should reach for
 these rather than write them again.
 
 ```bash
+py tools\measure_accuracy.py                # is the READING still as good?
 py tools\verify_exe.py                      # does the BUILD work?
 py tools\screenshot_pages.py --out shots    # what does it LOOK like?
 py tools\seed_demo.py --data-dir C:\temp\demo --with-image
@@ -885,6 +886,47 @@ py tools\mock_anthropic.py --port 8899      # a fake API, for testing without a 
 py tools\make_sample_receipt.py out.png     # a synthetic receipt image
 ```
 
+- **`measure_accuracy.py`** and **`accuracy.py`** — the accuracy harness
+  (1.10.0). Until it existed, every quality figure this project quoted lived in
+  prose: "16 of 18 header fields", "$28.47 unaccounted", "12 of 20 names". Each
+  was true when written, and none can be reproduced, because the set of
+  photographs it covered was never recorded beside it. A figure nobody can
+  recompute is a claim, not a measurement, and a claim cannot tell you whether
+  the next change made things better or worse.
+
+  `accuracy.py` is the scoring, kept pure — no OCR, no images, no Windows — so
+  its tests run anywhere. `measure_accuracy.py` runs the real engine over
+  `pictures\` and reports.
+
+  Three design decisions are load-bearing, and none should be undone casually:
+
+  1. **Ground truth and the baseline are separate files and are never merged.**
+     `tests/fixtures/receipts_truth.json` is what a human confirmed the paper
+     says, and measures *accuracy*. `tests/fixtures/accuracy_baseline.json` is
+     what this code produced on some day, and measures *regression*. A harness
+     that promotes its own last output to truth reports a clean pass for ever
+     while drifting arbitrarily far from the receipt.
+  2. **Invented lines are scored, not just missing ones.** Two rejected changes
+     (§11.42) cut the unaccounted money from $44.02 to $15.57 and then $2.77 by
+     inventing five and four lines that are not printed. On the money gap alone
+     both were triumphs. `--check` therefore guards `lines_invented` and
+     `items_read` as well as the gap, so a fabricating change must make the
+     report worse.
+  3. **A truth record carries the SHA-256 of its photograph**, so it cannot
+     silently be scored against a different image. That is not hypothetical:
+     `ALDI1.jpg` was re-photographed as `ALDI1_new.jpg` during 1.9.x.
+
+  The header truth distinguishes *verified absent* (the key is present with a
+  value of `null` — Walmart1 is photographed with its top out of frame, so a
+  reader that supplies a merchant is **wrong**) from *unchecked* (the key is
+  missing, and is not scored). Collapsing those two would silently require the
+  reader to return nothing for every field nobody has looked at yet.
+
+  **The corpus is one-sixth transcribed.** `Walmart1.jpg` has a human
+  transcription, shared with `tests/test_real_receipt.py` and guarded against
+  drift by a test. The other five photographs have hashes and self-checks only,
+  and `verified_by` records that honestly rather than implying otherwise.
+  Transcribing another receipt is the cheapest real improvement to this harness.
 - **`verify_exe.py`** — the test suite proves the *code* is right; only this
   proves the *build* is. It copies the .exe to an empty folder, waits for the
   window, checks the data folder is created, screenshots it, confirms a second
@@ -932,7 +974,7 @@ when done, and check with
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.4.1` |
+| `VERSION` | 1 | `1.10.0` |
 | `requirements.txt` | 31 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
@@ -970,6 +1012,8 @@ when done, and check with
 | `app/lookup/upc.py` | 70 | UPC-A check digit; the repair a Walmart receipt needs |
 | `app/i18n.py` | 309 | interface language, the Chinese table, and the CJK font |
 | `app/lookup/translate.py` | 241 | item names into Chinese, cached; Google then MyMemory |
+| `tools/accuracy.py` | 237 | accuracy scoring: pure, no OCR, runs anywhere |
+| `tools/measure_accuracy.py` | 218 | runs the engine over `pictures\`, reports, guards regressions |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
 | `tools/verify_exe.py` | 356 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
@@ -985,10 +1029,13 @@ when done, and check with
 | `tests/test_product_lookup.py` | 365 | barcode repair, both lookup sources, the cache, the rate-limit paths |
 | `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
+| `tests/test_accuracy.py` | 253 | the harness itself: invented lines, multiplicity, the truth/baseline split |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
+| `tests/fixtures/receipts_truth.json` | 164 | ground truth: what a human confirmed each photograph says |
+| `tests/fixtures/accuracy_baseline.json` | 115 | the baseline: what the code produced, for regression only |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-9 218 lines of Python. Not in version control: `data/` (the user's books),
+11 994 lines of Python across the 47 tracked `.py` files. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -998,7 +1045,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 310 tests pass** (`pytest tests/ -q`, ~66 s):
+**Automated — 328 tests pass** (`pytest tests/ -q`, ~70 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -1008,6 +1055,14 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   `effort` both arrive inside `output_config`, the allowed category list is
   passed, and 401/403/404/429/500 plus `refusal`/`max_tokens` all become
   actionable messages.
+- **The accuracy harness, 18 tests.** Mostly about the ways a scorer can
+  flatter the code it scores: an invented line is counted as invented, two
+  identical bread lines need two reads rather than one, a right amount under a
+  mangled name still pairs, verified-absent and unchecked header fields are
+  scored differently, and — the one that states the harness's purpose — a
+  simulated change that reconciles the money by fabricating two lines is
+  reported as a regression, not an improvement. One integration test runs the
+  real engine over the real photographs and skips where they are absent.
 - **The real window, driven by 28 tests**: every page builds; the theme switch
   rebuilds it; editing the review pane and saving reaches the database;
   confirming without a date or total is refused; the running line total flags a
@@ -2037,6 +2092,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.10.0 | 2026-09-01 | **The accuracy figures become reproducible.** Every quality number this project quoted lived in prose and covered an unrecorded set of photographs, so no later reader could tell whether a number moved because the code changed or because the corpus did. `tools/measure_accuracy.py` now runs the real engine over `pictures\` and reports items read, money unaccounted, header fields, and -- against a human transcription -- lines matched, missed and **invented**. Ground truth and the baseline are separate files and are never merged, because a harness that promotes its own output to truth passes for ever while drifting. `--check` guards invented lines as well as the money gap, so the two changes rejected in 11.42 would now fail automatically rather than by hand. Confirmed the known `DOVE BW 11OZ` defect independently: Walmart1 scores 23 matched, 1 missed, 0 invented, and the 5.47 unaccounted is exactly that line. 328 tests. |
 | 1.9.5 | 2026-08-31 | Documentation reconciled against the code (/md-renew-check, full mode). The handoff section claimed everything was pushed and tagged; nothing since 1.4.0 is either, and that claim would have sent the next session looking for work already done. Twenty stated line counts were stale after the 1.5.0–1.9.4 work, the .exe verification still quoted 1.5.1, the tag list did not say the later versions are deliberately untagged, and the 22 language tests had no entry in the verified list. No code changed. |
 | 1.9.4 | 2026-08-31 | **The fix round repeated the bug it was fixing.** The gate blocked a second time, correctly. `_SUMMARY_WORDS` had been converted to whole-word matching but `_PAYMENT_WORDS` had not, so `CHICKEN TENDERS` matched `TEND` — and because a payment line's amount disqualifies an unnamed item, a genuine `LOOSE PRODUCE 8.99` line vanished because the tenders cost the same. `CASHEWS` and `CARDAMOM` did it through `CASH` and `CARD`. Both lists now share `_whole_words()`. The comment claiming the trap was closed had also been orphaned onto the one list where it was still open — the same insertion-steals-a-comment fault as §11.47, in the commit that fixed §11.47. 310 tests, six photographs unchanged. |
 | 1.9.3 | 2026-08-31 | **What the quality gate caught.** The first push attempt was blocked, and the review was right to block it. Two comment blocks had been orphaned from the constants they explain by later insertions (§11.47), and two claims in `app/db.py` were false — one said all the new rules are priority 60 when 29 of them are merchant rules at 200, the other said CREAM was rejected for sitting inside SUNSCREEN, which it does not. Reading around those findings turned up a real defect: `CASHEWS` contains `CASH`, so a bag of cashews was discarded as a summary line and its money with it; `Q-TIPS` had the same fault through `TIP`. Summary words are matched on whole words now, which in turn exposed that OCR reads `TAX1` as `TAXI` (§11.44). Also narrowed which amounts can disqualify an item (§11.45) and closed a real publishing risk: `pictures/` was ignored only because today's files happen to be `.jpg` (§11.46). 308 tests. |
