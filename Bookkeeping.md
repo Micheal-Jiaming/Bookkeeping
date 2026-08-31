@@ -943,46 +943,46 @@ when done, and check with
 | `.gitignore` / `.gitattributes` | 31 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **all receipt images** ignored; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
-| `app/ui/window.py` | 543 | the window: chrome, menus, navigation, poll loop, dialogs |
-| `app/ui/receipts.py` | 655 | receipt list and the review pane |
-| `app/ui/reports.py` | 355 | tiles, hand-drawn canvas charts, merchant table |
-| `app/ui/theme.py` | 356 | four palettes, display scaling, ttk styling, shared widgets |
-| `app/ui/settings_page.py` | 304 | recognition settings |
-| `app/ui/rules.py` | 240 | categories and keyword rules |
+| `app/ui/window.py` | 572 | the window: chrome, menus, navigation, poll loop, dialogs |
+| `app/ui/receipts.py` | 720 | receipt list and the review pane |
+| `app/ui/reports.py` | 356 | tiles, hand-drawn canvas charts, merchant table |
+| `app/ui/theme.py` | 361 | four palettes, display scaling, ttk styling, shared widgets |
+| `app/ui/settings_page.py` | 334 | recognition settings |
+| `app/ui/rules.py` | 241 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
-| `app/pipeline.py` | 338 | scan orchestration, thread pool, engine fallback |
-| `app/db.py` | 485 | schema, seed categories and rules, migrations, connections |
-| `app/launcher.py` | 157 | data folder, logging, single-instance lock, error reporting |
+| `app/pipeline.py` | 371 | scan orchestration, thread pool, engine fallback |
+| `app/db.py` | 635 | schema, seed categories and rules, migrations, connections |
+| `app/launcher.py` | 175 | data folder, logging, single-instance lock, error reporting |
 | `app/categorize.py` | 131 | the precedence chain and rule matching |
 | `app/validate.py` | 126 | arithmetic and sanity checks → review flags |
 | `app/paths.py` | 103 | frozen vs. source paths; writable data folder with fallback |
 | `app/money.py` | 66 | integer-cent money conversion |
 | `app/images.py` | 66 | image normalisation (EXIF, downscale, PNG) |
 | `app/settings_store.py` | 60 | settings read/write, secret masking |
-| `app/extract/receipt_text.py` | 411 | shared: receipt text → `ExtractedReceipt` |
-| `app/extract/windows_ocr.py` | 257 | Windows OCR engine + word-box row reconstruction |
+| `app/extract/receipt_text.py` | 450 | shared: receipt text → `ExtractedReceipt` |
+| `app/extract/windows_ocr.py` | 367 | Windows OCR engine + word-box row reconstruction |
 | `app/extract/claude_vision.py` | 207 | Claude vision engine, pricing table, error mapping |
 | `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
 | `app/extract/tesseract_ocr.py` | 112 | Tesseract engine (parser now shared) |
 | `app/extract/__init__.py` | 89 | engine registry and fallback order |
 | `app/lookup/product_names.py` | 282 | Open Food Facts + UPCitemdb, paced, time-boxed, failure-tolerant |
-| `app/lookup/__init__.py` | 130 | the barcode-name cache and the entry point the pipeline calls |
-| `app/lookup/upc.py` | 54 | UPC-A check digit; the repair a Walmart receipt needs |
-| `app/i18n.py` | 290 | interface language, the Chinese table, and the CJK font |
-| `app/lookup/translate.py` | 204 | item names into Chinese, cached; Google then MyMemory |
+| `app/lookup/__init__.py` | 132 | the barcode-name cache and the entry point the pipeline calls |
+| `app/lookup/upc.py` | 70 | UPC-A check digit; the repair a Walmart receipt needs |
+| `app/i18n.py` | 309 | interface language, the Chinese table, and the CJK font |
+| `app/lookup/translate.py` | 241 | item names into Chinese, cached; Google then MyMemory |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
-| `tools/verify_exe.py` | 218 | drives the built .exe and checks it behaves (§7) |
+| `tools/verify_exe.py` | 356 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
 | `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
 | `tools/screenshot_pages.py` | 124 | opens the window and screenshots every page |
 | `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
-| `tests/test_ui.py` | 471 | builds the real window and drives it |
-| `tests/test_units.py` | 479 | money, validation, precedence, OCR-text parsing |
+| `tests/test_ui.py` | 498 | builds the real window and drives it |
+| `tests/test_units.py` | 554 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
 | `tests/test_theme.py` | 160 | every palette's contrast and status-distinctness |
-| `tests/test_i18n.py` | 205 | the language switch, and machine translation of item names |
-| `tests/test_product_lookup.py` | 317 | barcode repair, both lookup sources, the cache, the rate-limit paths |
+| `tests/test_i18n.py` | 242 | the language switch, and machine translation of item names |
+| `tests/test_product_lookup.py` | 365 | barcode repair, both lookup sources, the cache, the rate-limit paths |
 | `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
@@ -1092,6 +1092,15 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   try-every-orientation logic on the strength of a sideways-looking preview**;
   check for an EXIF orientation tag first. A genuinely rotated image with *no*
   EXIF tag remains untested.
+- **The language switch and the item translation** (`tests/test_i18n.py`, 22
+  tests): that English passes through untouched, that an untranslated string
+  falls back to English rather than showing a key, and that an unknown language
+  code does not raise. Three guard specific traps rather than behaviour — every
+  translation key must still match a string constant somewhere in `app/`, so
+  editing an English string cannot silently orphan its Chinese; the engine
+  picker and the status filter must round-trip through their translated labels
+  and still store English; and the glossary must outrank both the services and
+  the cache. As with the lookup tests, nothing here touches the network.
 - **The product-name lookup** (`tests/test_product_lookup.py`, 49 tests): the
   check-digit repair against all eight real receipt codes, both sources' parsers,
   the fallback from food database to catalogue, and — the ones that matter — that
@@ -1112,9 +1121,9 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   description; and the reading of the real receipt is asserted end to end.
 
 **By hand, against the built `Bookkeeping.exe` copied to an empty folder** (no
-Python, no venv, no source) — re-run for 1.5.1 with `tools\verify_exe.py`:
+Python, no venv, no source) — re-run for 1.9.4 with `tools\verify_exe.py`:
 
-- It opens a window titled `Bookkeeping 1.5.1`, class `TkTopLevel`, with the
+- It opens a window titled `Bookkeeping 1.9.4`, class `TkTopLevel`, with the
   receipt icon in the title bar and the File/View/Help menus.
 - It creates `data\bookkeeping.db` (60 KB, seeded) and `data\bookkeeping.log`
   beside itself.
@@ -1128,7 +1137,7 @@ Python, no venv, no source) — re-run for 1.5.1 with `tools\verify_exe.py`:
   and the refusal is confirmed from the log line rather than a window title
   (§11.36).
 - **Closing the window exits cleanly** (code 0), and `--version` afterwards
-  prints `1.5.1` — proving the lock was released.
+  prints `1.9.4` — proving the lock was released.
 - Startup measured at **3.4–3.6 s** to a visible window, over three runs.
 - The four pages and every theme were screenshotted from the running program and
   inspected: list, review pane with the image and a real arithmetic flag, charts
@@ -1268,16 +1277,26 @@ are not guessable from the printed text alone.
 
 ### Where to pick up
 
-The state as of 1.9.4, for whoever reads this next:
+The state as of 1.9.5, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
   without an API key or a Tesseract install, and the first real receipt it was
   ever given failed with four red flags and no data. Windows' own OCR now covers
   that case on any Windows 10/11 machine.
-- **Everything is committed and tagged**, and pushed to both `origin` (the
-  private GitHub repository) and `mirror`. `dist\Bookkeeping.exe` is built from
-  that commit and passes `tools\verify_exe.py`.
+- **Everything is committed. Nothing since 1.4.0 is pushed or tagged.** Thirteen
+  commits sit on `main` locally, `e0235a5` (1.4.1) through `51a3560` (1.9.4);
+  both `origin` (the private GitHub repository) and `mirror` are still at
+  `1437d53`. `dist\Bookkeeping.exe` is built from `51a3560` and passes
+  `tools\verify_exe.py`.
+
+  The quality gate blocked the push twice, correctly both times, and each block
+  found something a test run could not: a comment that stated a false reason
+  (§11.44), and behind it a real defect that silently dropped a purchased line.
+  Both are fixed. **A third review round was started and then stopped at the
+  user's request**, so the gate is simply un-run at the current digest rather
+  than failing — there is no known-outstanding finding. Pushing needs one clean
+  round of safety-engineer and quality-engineer, then the thirteen tags.
 - **The direction of travel is online, by the user's decision (August 2026):**
   "my ultimate goal for this software is for it to operate online, as internet
   connectivity is required to query certain information and provide accurate
@@ -1306,7 +1325,8 @@ The state as of 1.9.4, for whoever reads this next:
   per litre. That is the next thing worth asking the user for, and on the
   evidence so far it will find something.
 
-  The photographs live in `pictures\` as `Walmart1-3.jpg` and `ALDI1-2.jpg` and
+  The photographs live in `pictures\` as `Walmart1.jpg`, `Walmart2.jpg`, `Walmart3.jpg`, `ALDI1.jpg`,
+  `ALDI1_new.jpg` and `ALDI2.jpg` and
   are gitignored, deliberately: a receipt is somebody's shopping and their
   payment method. Do not commit them, and do not paste their card or reference
   numbers into anything.
@@ -1942,8 +1962,11 @@ sibling projects under `D:\claude`:
   its `HEAD` points at `main` so a clone checks out).
 - Baseline **1.0.0**. A functional change adds **0.1**, a fix or docs change adds
   **0.0.1**, updated in `VERSION` in the same commit and tagged `v<number>`.
-  Tags: `v1.0.0`, `v1.0.1`, `v1.1.0`, `v1.2.0`, `v1.2.1`, `v1.2.2`, `v1.3.0`,
-  `v1.4.0`.
+  Tags that exist: `v1.0.0`, `v1.0.1`, `v1.1.0`, `v1.2.0`, `v1.2.1`, `v1.2.2`,
+  `v1.3.0`, `v1.4.0`. **1.4.1 through 1.9.4 are committed but untagged**,
+  deliberately: a tag that is never pushed is a local-only fact, and the fix
+  commits kept moving where the newest version belonged. Create them at the same
+  time as the push, one per version, against the commit that bumped `VERSION`.
 - Tracked: all source, `Bookkeeping.spec`, `build.bat`, `run.bat`, `make_icon.py`
   and `assets/icon.ico` (generated, but the build needs it).
 - Ignored: `data/` (personal), `dist/` and `build/` (regenerable). **Because the
@@ -2014,6 +2037,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.9.5 | 2026-08-31 | Documentation reconciled against the code (/md-renew-check, full mode). The handoff section claimed everything was pushed and tagged; nothing since 1.4.0 is either, and that claim would have sent the next session looking for work already done. Twenty stated line counts were stale after the 1.5.0–1.9.4 work, the .exe verification still quoted 1.5.1, the tag list did not say the later versions are deliberately untagged, and the 22 language tests had no entry in the verified list. No code changed. |
 | 1.9.4 | 2026-08-31 | **The fix round repeated the bug it was fixing.** The gate blocked a second time, correctly. `_SUMMARY_WORDS` had been converted to whole-word matching but `_PAYMENT_WORDS` had not, so `CHICKEN TENDERS` matched `TEND` — and because a payment line's amount disqualifies an unnamed item, a genuine `LOOSE PRODUCE 8.99` line vanished because the tenders cost the same. `CASHEWS` and `CARDAMOM` did it through `CASH` and `CARD`. Both lists now share `_whole_words()`. The comment claiming the trap was closed had also been orphaned onto the one list where it was still open — the same insertion-steals-a-comment fault as §11.47, in the commit that fixed §11.47. 310 tests, six photographs unchanged. |
 | 1.9.3 | 2026-08-31 | **What the quality gate caught.** The first push attempt was blocked, and the review was right to block it. Two comment blocks had been orphaned from the constants they explain by later insertions (§11.47), and two claims in `app/db.py` were false — one said all the new rules are priority 60 when 29 of them are merchant rules at 200, the other said CREAM was rejected for sitting inside SUNSCREEN, which it does not. Reading around those findings turned up a real defect: `CASHEWS` contains `CASH`, so a bag of cashews was discarded as a summary line and its money with it; `Q-TIPS` had the same fault through `TIP`. Summary words are matched on whole words now, which in turn exposed that OCR reads `TAX1` as `TAXI` (§11.44). Also narrowed which amounts can disqualify an item (§11.45) and closed a real publishing risk: `pictures/` was ignored only because today's files happen to be `.jpg` (§11.46). 308 tests. |
 | 1.9.2 | 2026-08-31 | **Three problems from a real scan, two fixed and one deliberately not.** `ME DEPOSIT` was translating as 我存款 — "my deposit" — because ME is Maine and only a receipt knows that; a glossary now sits in front of the translator for words only a till roll explains (§11.42). Correcting an item's name now drops its barcode expansion with it: the wrong-name problem cannot be detected automatically (§11.31), so the reviewer editing the line is taken as the signal that the machine misread it (§11.43). The third — a line the OCR simply never read — was attacked twice and both attempts rejected: a union of the two passes, and a greedy fill that never overshoots the subtotal, cut the unaccounted money from $28.47 to $15.57 and $2.77 respectively, and invented 5 and 4 lines to do it. The reading currently invents nothing across six photographs, which is worth more than a better number (§11.41). 306 tests. |
