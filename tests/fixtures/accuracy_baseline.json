@@ -1,0 +1,116 @@
+{
+  "receipts": {
+    "ALDI1.jpg": {
+      "photo": "ALDI1.jpg",
+      "items_read": 11,
+      "items_sum_cents": 4972,
+      "subtotal_cents": 6517,
+      "unaccounted_cents": 1545,
+      "arithmetic_ok": false,
+      "header_present": 5,
+      "truth_lines": false,
+      "header_checked": 0,
+      "header_correct": 0,
+      "lines_matched": 0,
+      "lines_missed": 0,
+      "lines_invented": 0,
+      "names_exact": 0,
+      "notes": [
+        "nothing verified yet: self-checks only"
+      ]
+    },
+    "ALDI1_new.jpg": {
+      "photo": "ALDI1_new.jpg",
+      "items_read": 15,
+      "items_sum_cents": 5389,
+      "subtotal_cents": 6517,
+      "unaccounted_cents": 1128,
+      "arithmetic_ok": true,
+      "header_present": 5,
+      "truth_lines": false,
+      "header_checked": 0,
+      "header_correct": 0,
+      "lines_matched": 0,
+      "lines_missed": 0,
+      "lines_invented": 0,
+      "names_exact": 0,
+      "notes": [
+        "nothing verified yet: self-checks only"
+      ]
+    },
+    "ALDI2.jpg": {
+      "photo": "ALDI2.jpg",
+      "items_read": 7,
+      "items_sum_cents": 1743,
+      "subtotal_cents": 1743,
+      "unaccounted_cents": 0,
+      "arithmetic_ok": true,
+      "header_present": 5,
+      "truth_lines": false,
+      "header_checked": 0,
+      "header_correct": 0,
+      "lines_matched": 0,
+      "lines_missed": 0,
+      "lines_invented": 0,
+      "names_exact": 0,
+      "notes": [
+        "nothing verified yet: self-checks only"
+      ]
+    },
+    "Walmart1.jpg": {
+      "photo": "Walmart1.jpg",
+      "items_read": 23,
+      "items_sum_cents": 13647,
+      "subtotal_cents": 14194,
+      "unaccounted_cents": 547,
+      "arithmetic_ok": true,
+      "header_present": 3,
+      "truth_lines": true,
+      "header_checked": 5,
+      "header_correct": 5,
+      "lines_matched": 23,
+      "lines_missed": 1,
+      "lines_invented": 0,
+      "names_exact": 18,
+      "notes": []
+    },
+    "Walmart2.jpg": {
+      "photo": "Walmart2.jpg",
+      "items_read": 3,
+      "items_sum_cents": 2352,
+      "subtotal_cents": 2352,
+      "unaccounted_cents": 0,
+      "arithmetic_ok": null,
+      "header_present": 4,
+      "truth_lines": false,
+      "header_checked": 0,
+      "header_correct": 0,
+      "lines_matched": 0,
+      "lines_missed": 0,
+      "lines_invented": 0,
+      "names_exact": 0,
+      "notes": [
+        "nothing verified yet: self-checks only"
+      ]
+    },
+    "Walmart3.jpg": {
+      "photo": "Walmart3.jpg",
+      "items_read": 6,
+      "items_sum_cents": 912,
+      "subtotal_cents": 3510,
+      "unaccounted_cents": 2598,
+      "arithmetic_ok": true,
+      "header_present": 5,
+      "truth_lines": false,
+      "header_checked": 0,
+      "header_correct": 0,
+      "lines_matched": 0,
+      "lines_missed": 0,
+      "lines_invented": 0,
+      "names_exact": 0,
+      "notes": [
+        "nothing verified yet: self-checks only"
+      ]
+    }
+  }
+}
