@@ -974,7 +974,7 @@ when done, and check with
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.10.0` |
+| `VERSION` | 1 | `1.10.1` |
 | `requirements.txt` | 31 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
@@ -1032,7 +1032,7 @@ when done, and check with
 | `tests/test_accuracy.py` | 253 | the harness itself: invented lines, multiplicity, the truth/baseline split |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 | `tests/fixtures/receipts_truth.json` | 164 | ground truth: what a human confirmed each photograph says |
-| `tests/fixtures/accuracy_baseline.json` | 115 | the baseline: what the code produced, for regression only |
+| `tests/fixtures/accuracy_baseline.json` | 116 | the baseline: what the code produced, for regression only |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
 11 994 lines of Python across the 47 tracked `.py` files. Not in version control: `data/` (the user's books),
@@ -1101,10 +1101,42 @@ Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
   Mastercard line -- and 3 of 18 from the other. Five structural differences
   were responsible; all five are fixed, and 11.33 records them.
 
+  **The table below was measured by hand at 1.6.0 and is kept for the record. It
+  is superseded by `py tools\measure_accuracy.py`, which recomputes all of it
+  and is the figure to trust** -- a hand-written table is a snapshot of one
+  afternoon, and two of these cells silently stopped being true (see the note
+  under it).
+
   | Photo | Items | Subtotal | Tax | Total | Lines sum to |
   | --- | --- | --- | --- | --- | --- |
   | `ALDI1.jpg` 18 lines | 11 of 18 | exact | exact | exact | 39.03 of 65.17 |
   | `ALDI2.jpg` 7 lines | **7 of 7** | not found | exact | not found | 17.43, exact |
+
+  **Remeasured 2026-09-02, and two cells have moved since 1.6.0:**
+
+  | Photo | Items | Subtotal | Tax | Total | Unaccounted |
+  | --- | --- | --- | --- | --- | --- |
+  | `ALDI1.jpg` | 11 | 65.17 | **0.00 -- wrong** | 65.32 | 15.45 |
+  | `ALDI1_new.jpg` | 15 | 65.17 | 0.15 | 65.32 | 11.28 |
+  | `ALDI2.jpg` | 7 | **17.43** | 0.00 | **17.43** | 0.00 |
+
+  - **`ALDI2.jpg` now reads its subtotal and total**, which the 1.6.0 table
+    records as "not found". Two-pass reading (1.8.0) is the likely cause; it was
+    never written down, so the older table understates the parser.
+  - **`ALDI1.jpg`'s tax is read as `0.00` and is not exact.** `65.17 + 0.00` does
+    not equal the printed `65.32`, and the harness flags the arithmetic as BAD.
+    The same receipt re-photographed as `ALDI1_new.jpg` reads `0.15`, which
+    reconciles exactly, so **0.15 is what the paper says and `ALDI1.jpg` misreads
+    it.** Whether that is a regression introduced after 1.6.0 or an error in the
+    original hand-written table was **not determined** -- it needs a run against
+    the 1.6.0 code to settle, which is a code investigation rather than a
+    documentation one. Do not assume either answer.
+  - **`ALDI2.jpg`'s "7 of 7" is a hand-verified claim from 1.6.0, not a harness
+    measurement.** It has no transcription in `receipts_truth.json`, so the
+    harness reports it as "nothing verified yet" and scores it on
+    self-consistency only. Its items summing exactly to the printed subtotal is
+    strong evidence and is not the same thing as a transcription. Transcribing
+    this receipt is the cheapest way to turn the claim into a measurement.
 
   What is left on each is **OCR quality, not parsing**. `ALDI1.jpg` is deeply
   crumpled with diagonal shadows across the item block, and the engine returns
@@ -2092,6 +2124,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.10.1 | 2026-09-02 | Documentation reconciled (/md-renew-check, fast mode plus targeted verification of the 1.10.0 additions). The mechanical check was clean, but remeasuring the Aldi accuracy table against the code found two cells that had silently stopped being true: ALDI2 now reads its subtotal and total, which the 1.6.0 table records as not found, and ALDI1 tax reads 0.00 where the paper says 0.15 -- the harness flags that arithmetic as BAD, and whether it is a regression or an error in the original table is explicitly left undetermined. Also noted that ALDI2 7 of 7 is a hand-verified claim rather than a harness measurement, since that receipt has no transcription. One stale line count fixed, caused by accuracy_baseline.json lacking a trailing newline so wc -l and splitlines disagree by one. No code changed. |
 | 1.10.0 | 2026-09-01 | **The accuracy figures become reproducible.** Every quality number this project quoted lived in prose and covered an unrecorded set of photographs, so no later reader could tell whether a number moved because the code changed or because the corpus did. `tools/measure_accuracy.py` now runs the real engine over `pictures\` and reports items read, money unaccounted, header fields, and -- against a human transcription -- lines matched, missed and **invented**. Ground truth and the baseline are separate files and are never merged, because a harness that promotes its own output to truth passes for ever while drifting. `--check` guards invented lines as well as the money gap, so the two changes rejected in 11.42 would now fail automatically rather than by hand. Confirmed the known `DOVE BW 11OZ` defect independently: Walmart1 scores 23 matched, 1 missed, 0 invented, and the 5.47 unaccounted is exactly that line. 328 tests. |
 | 1.9.5 | 2026-08-31 | Documentation reconciled against the code (/md-renew-check, full mode). The handoff section claimed everything was pushed and tagged; nothing since 1.4.0 is either, and that claim would have sent the next session looking for work already done. Twenty stated line counts were stale after the 1.5.0–1.9.4 work, the .exe verification still quoted 1.5.1, the tag list did not say the later versions are deliberately untagged, and the 22 language tests had no entry in the verified list. No code changed. |
 | 1.9.4 | 2026-08-31 | **The fix round repeated the bug it was fixing.** The gate blocked a second time, correctly. `_SUMMARY_WORDS` had been converted to whole-word matching but `_PAYMENT_WORDS` had not, so `CHICKEN TENDERS` matched `TEND` — and because a payment line's amount disqualifies an unnamed item, a genuine `LOOSE PRODUCE 8.99` line vanished because the tenders cost the same. `CASHEWS` and `CARDAMOM` did it through `CASH` and `CARD`. Both lists now share `_whole_words()`. The comment claiming the trap was closed had also been orphaned onto the one list where it was still open — the same insertion-steals-a-comment fault as §11.47, in the commit that fixed §11.47. 310 tests, six photographs unchanged. |
