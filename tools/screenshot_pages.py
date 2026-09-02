@@ -19,9 +19,10 @@ Three things worth knowing before changing this:
 * The window is raised and made topmost first, because ``ImageGrab`` captures
   the screen, not the window: whatever is in front ends up in the picture.
 * **``--tight`` is mandatory for any image that will be published.** The default
-  box deliberately reaches ~46px above the window and 10px to each side so the
-  title bar and border are in frame, which is what you want when checking the
-  app's own icon and chrome. But ``ImageGrab`` grabs the *screen*, so that
+  box deliberately reaches outside the window on all four sides -- 46px above,
+  10px left and right, 12px below -- so the title bar and border are in frame,
+  which is what you want when checking the app's own icon and chrome. But
+  ``ImageGrab`` grabs the *screen*, so that
   margin captures whatever is behind the window -- another application, a
   document, the desktop -- and raising the window topmost does not help, because
   the margin is outside it. Every image in ``docs\\screenshots`` was taken with
