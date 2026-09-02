@@ -975,14 +975,16 @@ when done, and check with
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
 | `VERSION` | 1 | `1.10.1` |
-| `requirements.txt` | 31 | pinned to the versions actually installed and tested |
+| `README.md` | 188 | the public landing page: what it is, the measured accuracy, and the honest network boundary |
+| `docs/screenshots/*.png` | 4 files | the README's images, from demo books via `--tight` (see the note in `.gitignore`) |
+| `requirements.txt` | 38 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
 | `build.bat` | 47 | build `dist\Bookkeeping.exe`, keeping the previous one |
 | `Bookkeeping.spec` | 93 | PyInstaller build definition, with the reasoning inline |
 | `make_icon.py` | 128 | draws `assets/icon.ico` (a receipt with a torn edge) |
 | `assets/icon.ico` | — | 8 sizes, 16–256 px; generated but tracked, because the build needs it |
-| `.gitignore` / `.gitattributes` | 31 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **all receipt images** ignored; `* -text` |
+| `.gitignore` / `.gitattributes` | 44 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **all receipt images** ignored, with one narrow `!docs/screenshots/*.png` exception; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
 | `app/ui/window.py` | 572 | the window: chrome, menus, navigation, poll loop, dialogs |
@@ -1018,7 +1020,7 @@ when done, and check with
 | `tools/verify_exe.py` | 356 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
 | `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
-| `tools/screenshot_pages.py` | 124 | opens the window and screenshots every page |
+| `tools/screenshot_pages.py` | 144 | opens the window and screenshots every page; `--tight` clips to the client area, which is **mandatory** for anything published |
 | `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
 | `tests/test_ui.py` | 498 | builds the real window and drives it |
 | `tests/test_units.py` | 554 | money, validation, precedence, OCR-text parsing |
@@ -1035,7 +1037,7 @@ when done, and check with
 | `tests/fixtures/accuracy_baseline.json` | 116 | the baseline: what the code produced, for regression only |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-11 994 lines of Python across the 47 tracked `.py` files. Not in version control: `data/` (the user's books),
+12 722 lines of Python across the 50 tracked `.py` files. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -2044,25 +2046,65 @@ sibling projects under `D:\claude`:
 - `core.autocrlf=false` locally, plus `.gitattributes` with `* -text`, so files
   are stored byte for byte (this machine has `core.autocrlf=true` system-wide,
   which would otherwise rewrite every text file to CRLF on the first checkout).
-- `user.name = xu.jiamin`, `user.email = Xujiaming021101@163.com`, per repository.
+- `user.name = xu.jiamin`, `user.email = 318819920+Micheal-Jiaming@users.noreply.github.com`,
+  per repository. **Do not set this back to a personal address.** The repository
+  is public, GitHub shows commit author emails, and a single commit made with a
+  personal address would put it into public history permanently. See the
+  publication note below.
 - Remote `mirror` → `D:\claude\repos\Bookkeeping.git` (a local bare second copy;
   its `HEAD` points at `main` so a clone checks out).
 - Baseline **1.0.0**. A functional change adds **0.1**, a fix or docs change adds
   **0.0.1**, updated in `VERSION` in the same commit and tagged `v<number>`.
-  Tags that exist: `v1.0.0`, `v1.0.1`, `v1.1.0`, `v1.2.0`, `v1.2.1`, `v1.2.2`,
-  `v1.3.0`, `v1.4.0`. **1.4.1 through 1.9.4 are committed but untagged**,
-  deliberately: a tag that is never pushed is a local-only fact, and the fix
-  commits kept moving where the newest version belonged. Create them at the same
-  time as the push, one per version, against the commit that bumped `VERSION`.
-- Tracked: all source, `Bookkeeping.spec`, `build.bat`, `run.bat`, `make_icon.py`
-  and `assets/icon.ico` (generated, but the build needs it).
+  Tags: **`v1.0.0` through `v1.9.5`, 22 of them**, all pushed to both remotes.
+  1.10.0, 1.10.1 and 1.10.2 were committed untagged and are tagged as part of the
+  1.11.0 publication push. **The 1.11.0 history rewrite changed every commit SHA**,
+  so all earlier tags were deleted and recreated against the rewritten commits — a
+  tag still pointing at a pre-rewrite SHA would dangle, and `git push --tags` would
+  silently keep publishing the old object. Tag one per version, against the commit
+  that bumped `VERSION`.
+- Tracked: all source, `Bookkeeping.spec`, `build.bat`, `run.bat`, `make_icon.py`,
+  `assets/icon.ico` (generated, but the build needs it), `README.md`, and the four
+  PNGs in `docs/screenshots/`. Those images are re-included past the blanket
+  `*.png` rule by a single deliberately narrow `!docs/screenshots/*.png`, so a
+  receipt photograph dropped anywhere else in the tree is still ignored — verified
+  by check-ignore on a probe file in both locations.
+- **`README.md` is a deliberate, permitted exception to the one-document-per-project
+  rule, and must not be "merged and deleted" as a duplicate.** `/md-renew-check`
+  reports it as a second Markdown document, because that is what the workspace
+  convention normally forbids. The exception exists because GitHub renders
+  `README.md` as the repository's landing page and will not render
+  `Bookkeeping.md`; without it a public repository presents as a bare file listing
+  with no entry point. The division of labour is strict, and keeping it strict is
+  what stops this becoming a genuine duplicate: **`README.md` is a landing page
+  for a human visitor** — what the project is, the measured numbers, how to run
+  it, what it cannot do — and **`Bookkeeping.md` remains the single source of
+  truth** for architecture, rejected alternatives, fix history and handoff. When
+  the two disagree, this document wins and the README is the one to correct.
 - Ignored: `data/` (personal), `dist/` and `build/` (regenerable). **Because the
   .exe is not in Git, `build.bat` keeps the previous one as
   `dist\Bookkeeping.previous.exe` — that is the only way back from a bad build.**
 
 `origin` is <https://github.com/Micheal-Jiaming/Bookkeeping>, created 2026-08-29.
-**It is private and stays private** — that is a standing instruction from the
-user, not a default to revisit, so do not offer to make it public.
+
+**It is public as of 2026-09-03.** It was private until then, and that was a
+standing instruction rather than a default; the reversal was an explicit decision
+by the user, who wants interviewers to read and run the project. The earlier
+instruction is recorded here rather than deleted, because the reasoning behind it
+still applies to everything the repository does *not* contain. Three consequences
+to carry forward:
+
+- **The commit author identity was rewritten before publication.** Every commit
+  and tag in history is now authored as
+  `xu.jiamin <318819920+Micheal-Jiaming@users.noreply.github.com>`. The personal
+  address previously used locally appears in no commit header and no longer in
+  this document. This was done *before* the repository went public, while nothing
+  had been cloned, which is the only moment it is cheap.
+- **Publishing is one-way in practice.** Anything public can already have been
+  cloned, forked, cached or indexed. Treat a leak discovered after this date as
+  disclosed, not as something that making the repository private again would undo.
+- **Receipt photographs and `data/` remain the things that must never be
+  committed**, and the stakes are now higher rather than lower. The `.gitignore`
+  reasoning below is the control that matters most.
 
 Receipt photographs are gitignored (`*.jpg`, `*.jpeg`, `*.png`, unanchored so the
 rules cover `shots\` output too, with `!assets/icon-preview.png` for the program
@@ -2124,6 +2166,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.11.0 | 2026-09-03 | **Published.** The repository went public so interviewers can read and run the project, reversing a standing private-only instruction. Prepared for that in four ways. (1) A `README.md` landing page, because GitHub renders `README.md` and not `Bookkeeping.md`, so the repository previously presented as a bare file listing with no entry point; it leads with the measured accuracy and states the network boundary explicitly. (2) Four screenshots in `docs/screenshots/`, taken against demo books — and this exposed a real hazard in `screenshot_pages.py`, whose capture box deliberately reaches ~46px above and 10px either side of the window to include the title bar. `ImageGrab` grabs the *screen*, so that margin captured fragments of other windows behind the app; the first set of images was discarded and a `--tight` flag added that clips to the client area exactly. A second set leaked the Windows username through the settings page's data-folder path and was also discarded. (3) The commit author email was rewritten across all history to a GitHub noreply address before publication. (4) `pydantic` was declared in `requirements.txt` — `app/extract/base.py` imports it directly, and it had been arriving only transitively through `anthropic`. Also corrected the tag list (22 exist, the doc claimed 8) and three stale line counts, including a Python total measured just before the 1.10.0 harness files were staged. No application code changed; 328 tests. |
 | 1.10.1 | 2026-09-02 | Documentation reconciled (/md-renew-check, fast mode plus targeted verification of the 1.10.0 additions). The mechanical check was clean, but remeasuring the Aldi accuracy table against the code found two cells that had silently stopped being true: ALDI2 now reads its subtotal and total, which the 1.6.0 table records as not found, and ALDI1 tax reads 0.00 where the paper says 0.15 -- the harness flags that arithmetic as BAD, and whether it is a regression or an error in the original table is explicitly left undetermined. Also noted that ALDI2 7 of 7 is a hand-verified claim rather than a harness measurement, since that receipt has no transcription. One stale line count fixed, caused by accuracy_baseline.json lacking a trailing newline so wc -l and splitlines disagree by one. No code changed. |
 | 1.10.0 | 2026-09-01 | **The accuracy figures become reproducible.** Every quality number this project quoted lived in prose and covered an unrecorded set of photographs, so no later reader could tell whether a number moved because the code changed or because the corpus did. `tools/measure_accuracy.py` now runs the real engine over `pictures\` and reports items read, money unaccounted, header fields, and -- against a human transcription -- lines matched, missed and **invented**. Ground truth and the baseline are separate files and are never merged, because a harness that promotes its own output to truth passes for ever while drifting. `--check` guards invented lines as well as the money gap, so the two changes rejected in 11.42 would now fail automatically rather than by hand. Confirmed the known `DOVE BW 11OZ` defect independently: Walmart1 scores 23 matched, 1 missed, 0 invented, and the 5.47 unaccounted is exactly that line. 328 tests. |
 | 1.9.5 | 2026-08-31 | Documentation reconciled against the code (/md-renew-check, full mode). The handoff section claimed everything was pushed and tagged; nothing since 1.4.0 is either, and that claim would have sent the next session looking for work already done. Twenty stated line counts were stale after the 1.5.0–1.9.4 work, the .exe verification still quoted 1.5.1, the tag list did not say the later versions are deliberately untagged, and the 22 language tests had no entry in the verified list. No code changed. |

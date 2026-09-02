@@ -35,3 +35,10 @@ pictures/
 *.jpeg
 *.png
 !assets/icon-preview.png
+# The README's screenshots. Safe to publish, and deliberately narrow: only this
+# one directory is re-included, so a receipt photo dropped anywhere else is
+# still ignored. Every image here was taken with
+# `tools\screenshot_pages.py --tight` against demo books seeded by
+# `tools\seed_demo.py` -- never against real books. Without --tight the capture
+# box reaches outside the window and picks up whatever is behind it.
+!docs/screenshots/*.png
