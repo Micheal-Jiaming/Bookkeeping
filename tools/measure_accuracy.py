@@ -87,7 +87,11 @@ def measure(photo_dir: Path = PHOTO_DIR) -> list[Score]:
             score.notes.append("no truth record: self-checks only")
         elif truth.sha256 and truth.sha256 != digest:
             # The truth file describes a different image than the one on disk.
-            # Scoring it anyway would silently compare against the wrong paper.
+            # The score is still computed and still compared against the
+            # baseline -- it is flagged, not quarantined -- so a re-photographed
+            # receipt can show up as a regression when nothing regressed. The
+            # note is what tells the reader to re-transcribe rather than to go
+            # looking for a code fault.
             score.notes.append("PHOTO CHANGED since the truth was written")
         elif not truth.header and not truth.has_lines:
             score.notes.append("nothing verified yet: self-checks only")
@@ -162,9 +166,15 @@ def compare(scores: list[Score], baseline_path: Path = BASELINE_PATH) -> list[st
             if (now - before) * worse_direction > 0:
                 problems.append(
                     f"{s.photo}: {description} ({before} -> {now})")
-        # Money is guarded separately: only the size of the gap matters, and a
-        # gap that moves in either direction by more than a cent is worth
-        # seeing, because a shrinking one can mean invented lines.
+        # Money is guarded separately, and deliberately only in one direction:
+        # a gap that GROWS is reported, a gap that shrinks is not. That looks
+        # like a hole -- a gap can shrink because lines were invented to close
+        # it -- but closing it that way is caught by `lines_invented` in
+        # GUARDED above, which is the right place for it. Guarding the shrink
+        # here as well would report every genuine improvement as a regression;
+        # `test_a_genuine_improvement_is_not_reported_as_a_regression` pins
+        # that. Any increase at all is reported: these are integer cents and
+        # there is no tolerance band.
         now, before = s.unaccounted_cents, was.get("unaccounted_cents")
         if None not in (now, before) and abs(now) > abs(before):
             problems.append(

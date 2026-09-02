@@ -974,7 +974,7 @@ when done, and check with
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.10.1` |
+| `VERSION` | 1 | `1.11.1` |
 | `README.md` | 188 | the public landing page: what it is, the measured accuracy, and the honest network boundary |
 | `docs/screenshots/*.png` | 4 files | the README's images, from demo books via `--tight` (see the note in `.gitignore`) |
 | `requirements.txt` | 38 | pinned to the versions actually installed and tested |
@@ -984,7 +984,7 @@ when done, and check with
 | `Bookkeeping.spec` | 93 | PyInstaller build definition, with the reasoning inline |
 | `make_icon.py` | 128 | draws `assets/icon.ico` (a receipt with a torn edge) |
 | `assets/icon.ico` | — | 8 sizes, 16–256 px; generated but tracked, because the build needs it |
-| `.gitignore` / `.gitattributes` | 44 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **all receipt images** ignored, with one narrow `!docs/screenshots/*.png` exception; `* -text` |
+| `.gitignore` / `.gitattributes` | 53 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **all receipt images** ignored, with the four README screenshots re-included **by name, not by directory**; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
 | `app/ui/window.py` | 572 | the window: chrome, menus, navigation, poll loop, dialogs |
@@ -1015,12 +1015,12 @@ when done, and check with
 | `app/i18n.py` | 309 | interface language, the Chinese table, and the CJK font |
 | `app/lookup/translate.py` | 241 | item names into Chinese, cached; Google then MyMemory |
 | `tools/accuracy.py` | 237 | accuracy scoring: pure, no OCR, runs anywhere |
-| `tools/measure_accuracy.py` | 218 | runs the engine over `pictures\`, reports, guards regressions |
+| `tools/measure_accuracy.py` | 228 | runs the engine over `pictures\`, reports, guards regressions |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
 | `tools/verify_exe.py` | 356 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
 | `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
-| `tools/screenshot_pages.py` | 144 | opens the window and screenshots every page; `--tight` clips to the client area, which is **mandatory** for anything published |
+| `tools/screenshot_pages.py` | 145 | opens the window and screenshots every page; `--tight` clips to the client area, which is **mandatory** for anything published |
 | `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
 | `tests/test_ui.py` | 498 | builds the real window and drives it |
 | `tests/test_units.py` | 554 | money, validation, precedence, OCR-text parsing |
@@ -1037,7 +1037,7 @@ when done, and check with
 | `tests/fixtures/accuracy_baseline.json` | 116 | the baseline: what the code produced, for regression only |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-12 722 lines of Python across the 50 tracked `.py` files. Not in version control: `data/` (the user's books),
+12 733 lines of Python across the 50 tracked `.py` files. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -2064,10 +2064,14 @@ sibling projects under `D:\claude`:
   that bumped `VERSION`.
 - Tracked: all source, `Bookkeeping.spec`, `build.bat`, `run.bat`, `make_icon.py`,
   `assets/icon.ico` (generated, but the build needs it), `README.md`, and the four
-  PNGs in `docs/screenshots/`. Those images are re-included past the blanket
-  `*.png` rule by a single deliberately narrow `!docs/screenshots/*.png`, so a
-  receipt photograph dropped anywhere else in the tree is still ignored — verified
-  by check-ignore on a probe file in both locations.
+  PNGs in `docs/screenshots/`. Those four are re-included past the blanket
+  `*.png` rule **by name, one line each — not by directory**.
+  `!docs/screenshots/*.png` is the obvious way to write it and is worse: it would
+  re-include any PNG later dropped in that folder, and in a project whose whole
+  image policy exists because real receipt photographs land in the working tree,
+  that is the one place a receipt could become publishable with nobody editing
+  `.gitignore`. Verified by check-ignore — a fifth PNG in that exact directory is
+  ignored, and the four named ones are tracked.
 - **`README.md` is a deliberate, permitted exception to the one-document-per-project
   rule, and must not be "merged and deleted" as a duplicate.** `/md-renew-check`
   reports it as a second Markdown document, because that is what the workspace
@@ -2166,6 +2170,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.11.1 | 2026-09-03 | **What the pre-publication review caught.** The quality gate blocked, correctly, on a comment that contradicted its own code. `compare()` guards the money gap with `abs(now) > abs(before)`, which fires only when the gap GROWS, and the comment claimed it watched movement “in either direction by more than a cent” — wrong twice, and wrong in the direction that matters: it told a future maintainer the `lines_invented` guard was redundant when it is in fact the only thing catching a gap closed by fabrication. There is a test pinning the one-directional behaviour, so the code was right and the comment was the defect. Also corrected: the changed-photo note implied the score was quarantined when it is scored and compared like any other, so a re-photographed receipt can read as a regression; and a docstring I had just written enumerated three of the capture box's four margins, understating the exposure it exists to warn about. Separately, the safety review's one surviving finding was taken: the screenshots were re-included by `!docs/screenshots/*.png`, which protects a *location* rather than four known files, so any PNG later dropped there would be publishable — now an allowlist of four names. Four stale line counts. No behaviour changed; 328 tests. |
 | 1.11.0 | 2026-09-03 | **Published.** The repository went public so interviewers can read and run the project, reversing a standing private-only instruction. Prepared for that in four ways. (1) A `README.md` landing page, because GitHub renders `README.md` and not `Bookkeeping.md`, so the repository previously presented as a bare file listing with no entry point; it leads with the measured accuracy and states the network boundary explicitly. (2) Four screenshots in `docs/screenshots/`, taken against demo books — and this exposed a real hazard in `screenshot_pages.py`, whose capture box deliberately reaches ~46px above and 10px either side of the window to include the title bar. `ImageGrab` grabs the *screen*, so that margin captured fragments of other windows behind the app; the first set of images was discarded and a `--tight` flag added that clips to the client area exactly. A second set leaked the Windows username through the settings page's data-folder path and was also discarded. (3) The commit author email was rewritten across all history to a GitHub noreply address before publication. (4) `pydantic` was declared in `requirements.txt` — `app/extract/base.py` imports it directly, and it had been arriving only transitively through `anthropic`. Also corrected the tag list (22 exist, the doc claimed 8) and three stale line counts, including a Python total measured just before the 1.10.0 harness files were staged. No application code changed; 328 tests. |
 | 1.10.1 | 2026-09-02 | Documentation reconciled (/md-renew-check, fast mode plus targeted verification of the 1.10.0 additions). The mechanical check was clean, but remeasuring the Aldi accuracy table against the code found two cells that had silently stopped being true: ALDI2 now reads its subtotal and total, which the 1.6.0 table records as not found, and ALDI1 tax reads 0.00 where the paper says 0.15 -- the harness flags that arithmetic as BAD, and whether it is a regression or an error in the original table is explicitly left undetermined. Also noted that ALDI2 7 of 7 is a hand-verified claim rather than a harness measurement, since that receipt has no transcription. One stale line count fixed, caused by accuracy_baseline.json lacking a trailing newline so wc -l and splitlines disagree by one. No code changed. |
 | 1.10.0 | 2026-09-01 | **The accuracy figures become reproducible.** Every quality number this project quoted lived in prose and covered an unrecorded set of photographs, so no later reader could tell whether a number moved because the code changed or because the corpus did. `tools/measure_accuracy.py` now runs the real engine over `pictures\` and reports items read, money unaccounted, header fields, and -- against a human transcription -- lines matched, missed and **invented**. Ground truth and the baseline are separate files and are never merged, because a harness that promotes its own output to truth passes for ever while drifting. `--check` guards invented lines as well as the money gap, so the two changes rejected in 11.42 would now fail automatically rather than by hand. Confirmed the known `DOVE BW 11OZ` defect independently: Walmart1 scores 23 matched, 1 missed, 0 invented, and the 5.47 unaccounted is exactly that line. 328 tests. |

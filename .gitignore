@@ -35,10 +35,19 @@ pictures/
 *.jpeg
 *.png
 !assets/icon-preview.png
-# The README's screenshots. Safe to publish, and deliberately narrow: only this
-# one directory is re-included, so a receipt photo dropped anywhere else is
-# still ignored. Every image here was taken with
+# The README's screenshots. Every one was taken with
 # `tools\screenshot_pages.py --tight` against demo books seeded by
 # `tools\seed_demo.py` -- never against real books. Without --tight the capture
 # box reaches outside the window and picks up whatever is behind it.
-!docs/screenshots/*.png
+#
+# Named one by one rather than as `!docs/screenshots/*.png`, which is the
+# obvious way to write it and is worse. A directory pattern re-includes any PNG
+# later dropped in that folder, and in a project whose entire image policy
+# exists because real receipt photographs land in the working tree, that is the
+# one place a receipt could become publishable without anybody editing this
+# file. An allowlist of four names cannot do that: a fifth image has to be added
+# here on purpose, which is the moment somebody should be thinking about it.
+!docs/screenshots/receipts.png
+!docs/screenshots/reports.png
+!docs/screenshots/rules.png
+!docs/screenshots/settings.png
