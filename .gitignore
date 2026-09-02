@@ -40,6 +40,13 @@ pictures/
 # `tools\seed_demo.py` -- never against real books. Without --tight the capture
 # box reaches outside the window and picks up whatever is behind it.
 #
+# receipts.png is REDACTED after capture: the Payment field is blurred. Re-shoot
+# it and the blur is gone, so redact again before committing. The value under it
+# is demo data from seed_demo.py and not anybody's card, but a card-shaped string
+# beside real merchant names reads as real to a stranger who cannot audit the
+# fixture, and a published image is judged on how it looks, not on where it came
+# from.
+#
 # Named one by one rather than as `!docs/screenshots/*.png`, which is the
 # obvious way to write it and is worse. A directory pattern re-includes any PNG
 # later dropped in that folder, and in a project whose entire image policy
