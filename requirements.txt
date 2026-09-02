@@ -5,6 +5,13 @@
 anthropic==1.0.0
 pillow==12.3.0
 
+# Declared explicitly even though `anthropic` already depends on it. Our own
+# `app/extract/base.py` imports BaseModel and Field directly, so this is a real
+# first-order dependency of this project, not something inherited -- and relying
+# on a transitive install means the app breaks the day anthropic changes its
+# validation library. Pinned to the version in .venv on 2026-09-03.
+pydantic==2.13.4
+
 # Offline OCR, and the reason the app works with no API key and no install:
 # these are the Python bindings for Windows' own OCR engine, which ships with
 # Windows 10 and 11. They are bindings only -- nothing is downloaded at runtime

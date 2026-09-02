@@ -9,14 +9,23 @@ truncated because a pixel width was not scaled for the display.
 
     py tools\\screenshot_pages.py --out shots --data-dir C:\\temp\\demo-books
     py tools\\screenshot_pages.py --out shots --theme light
+    py tools\\screenshot_pages.py --out docs\\screenshots --tight --theme dark
 
-Two things worth knowing before changing this:
+Three things worth knowing before changing this:
 
 * ``time.sleep`` does not run Tk's event loop, so anything scheduled with
   ``after()`` -- the debounced chart redraw above all -- will not have happened.
   Pump the loop instead; ``settle()`` below does.
 * The window is raised and made topmost first, because ``ImageGrab`` captures
   the screen, not the window: whatever is in front ends up in the picture.
+* **``--tight`` is mandatory for any image that will be published.** The default
+  box deliberately reaches ~46px above the window and 10px to each side so the
+  title bar and border are in frame, which is what you want when checking the
+  app's own icon and chrome. But ``ImageGrab`` grabs the *screen*, so that
+  margin captures whatever is behind the window -- another application, a
+  document, the desktop -- and raising the window topmost does not help, because
+  the margin is outside it. Every image in ``docs\\screenshots`` was taken with
+  ``--tight``, which clips to the client area exactly.
 """
 
 from __future__ import annotations
@@ -55,6 +64,11 @@ def main() -> int:
                         help="Force a theme instead of using the saved one.")
     parser.add_argument("--pages", default=",".join(PAGES),
                         help=f"Comma-separated subset of {','.join(PAGES)}.")
+    parser.add_argument("--tight", action="store_true",
+                        help="Clip to the window's client area, excluding the "
+                             "title bar and border. Required for published "
+                             "images: the default margin grabs whatever is "
+                             "behind the window (see the module docstring).")
     args = parser.parse_args()
 
     if args.data_dir:
@@ -91,9 +105,15 @@ def main() -> int:
         settle(root)
         x, y = root.winfo_rootx(), root.winfo_rooty()
         width, height = root.winfo_width(), root.winfo_height()
-        # Reach above and around the client area to include the title bar and
-        # the window border, which is where the app's own icon and title show.
-        box = (max(0, x - 10), max(0, y - 46), x + width + 10, y + height + 12)
+        if args.tight:
+            # Exactly the client area. Nothing outside the window can appear.
+            box = (x, y, x + width, y + height)
+        else:
+            # Reach above and around the client area to include the title bar
+            # and the window border, which is where the app's own icon and
+            # title show. Only safe when the picture is not going to be
+            # published -- the margin is screen, not window.
+            box = (max(0, x - 10), max(0, y - 46), x + width + 10, y + height + 12)
         path = args.out / f"{name}.png"
         ImageGrab.grab(bbox=box).save(path)
         written.append(path)
