@@ -33,7 +33,38 @@ pictures/
 
 *.jpg
 *.jpeg
+*.jfif
 *.png
+# The formats the comment above named as the hole, now actually covered. A phone
+# or a scanner does not produce .jpg just because today's test photographs did:
+# .heic is the iPhone default, .jfif is what Chrome on Windows saves a JPEG as,
+# .webp and .avif come out of a browser download, .bmp/.tif/.tiff are scanner
+# output, and a scanned receipt is very often a .pdf. Every one of them would
+# have been untracked *and* unignored, so a single `git add -A` would have
+# published somebody's shopping. None is tracked anywhere here, so they cost
+# nothing.
+#
+# Two limits, worth knowing now rather than discovering later:
+#
+# * **These patterns are case-sensitive where the filesystem is.** They catch
+#   `IMG_0001.HEIC` on this machine only because NTFS gives Git
+#   core.ignorecase=true -- and upper case is exactly what an iPhone emits. On a
+#   Linux clone, or a case-sensitive macOS volume, that filename is unignored
+#   again. Run `git check-ignore` there rather than assuming this file travels.
+# * **A `!` line can only re-include a file that has no excluded parent
+#   DIRECTORY.** `!docs/something.pdf` would work; nothing can rescue a file
+#   inside `pictures/` or `data/`, which is precisely where a receipt PDF would
+#   land. Treat that as the intended shape rather than a defect: those two
+#   directories stay absolutely closed, and anything meant to be published
+#   belongs outside them.
+*.heic
+*.heif
+*.webp
+*.avif
+*.bmp
+*.tif
+*.tiff
+*.pdf
 !assets/icon-preview.png
 # The README's screenshots. Every one was taken with
 # `tools\screenshot_pages.py --tight` against demo books seeded by
