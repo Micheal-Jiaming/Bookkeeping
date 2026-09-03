@@ -25,10 +25,14 @@ sample-receipt.png
 # Unanchored on purpose: `tools\screenshot_pages.py` and `verify_exe.py --out`
 # both write PNGs into a subdirectory (`shots\` by default), which is exactly
 # where a root-only rule would stop protecting anything.
-# Receipt photographs. The extension rules below caught these only because
-# today's files happen to be .jpg; a receipt saved as .heic (the iPhone
-# default), .webp or a scanned .pdf would be untracked *and* unignored, and
-# the next `git add -A` would publish somebody's shopping and card digits.
+# Receipt photographs. **Past tense throughout, because the hole this describes
+# is closed** -- it is kept rather than deleted because the reason the extension
+# list has to be generous is easier to understand from the gap it used to have
+# than from the list itself. Until the rules below were extended, they caught
+# receipts only because today's test files happen to be .jpg: one saved as .heic
+# (the iPhone default), .webp, or a scanned .pdf was untracked *and* unignored,
+# and the next `git add -A` would have published somebody's shopping and card
+# digits. See the block beneath the extension rules for what is covered now.
 pictures/
 
 *.jpg
