@@ -640,3 +640,17 @@ def test_amount_cents_keeps_the_sign_of_a_small_refund():
     assert _amount_cents("-0.15") == -15
     assert _amount_cents("0.15") == 15
     assert _amount_cents("-2.00") == -200
+
+
+def test_cents_text_keeps_the_sign_of_a_small_refund():
+    """The mirror of _amount_cents's trap, on the way back out.
+
+    Python floors, so -15 // 100 is -1 and -15 % 100 is 85: the obvious
+    one-liner renders fifteen cents of refund as "-1.85".
+    """
+    from app.extract.receipt_text import _amount_cents, _cents_text
+    assert _cents_text(-15) == "-0.15"
+    assert _cents_text(-200) == "-2.00"
+    assert _cents_text(0) == "0.00"
+    for cents in (-201, -15, -1, 0, 1, 515, 19352):
+        assert _amount_cents(_cents_text(cents)) == cents

@@ -713,6 +713,22 @@ class ReviewPane:
         if self.receipt is None:
             return
         text = self.receipt["raw_response"] or self.receipt["raw_text"] or ""
+        if privacy.masking_on():
+            # This pane is the one place a receipt's own numbers reach the
+            # screen verbatim -- a Costco reading carries the membership
+            # number in its first five lines, with the card trailer just
+            # below. (The real values are deliberately not written here: the
+            # receipt photographs are gitignored precisely so nobody's member
+            # number reaches a public repository, and copying one into a
+            # comment walks straight past that.) The option would have been a false
+            # promise without this: it named membership numbers while covering
+            # only the Payment field, and this window sat outside it.
+            #
+            # Masking every digit here is blunt and costs the amounts too, but
+            # this is an audit view rather than a working one, and the way to
+            # read it in full is one keystroke away.
+            text = (t("(digits hidden — Ctrl+M shows them)") + "\n\n"
+                    + privacy.mask(text))
         window = tk.Toplevel(self.frame)
         window.title(t("Engine output — receipt #") + str(self.receipt["id"]))
         window.configure(bg=self.theme["CARD"])

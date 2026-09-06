@@ -615,3 +615,52 @@ def test_the_menu_toggle_flips_the_setting_and_redraws(window):
     pump(window)
     assert privacy.masking_on() is True
     assert window.mask_var.get() is True
+
+
+def test_the_engine_output_window_masks_the_receipts_own_numbers(window, books,
+                                                                 monkeypatch):
+    """The hole the first version of this feature left open.
+
+    The option named membership numbers, but covered only the Payment field --
+    and the raw engine output is the one place a membership number reaches the
+    screen verbatim. A Costco reading carries the membership number in its
+    first lines, so the promise was false exactly where it mattered. The
+    digits below are invented -- a real one must not enter a tracked file.
+    """
+    import tkinter as tk
+    from app import settings_store
+
+    window.add_manual()
+    pump(window)
+    page = window.pages["receipts"]
+    receipt_id = page.selected
+    raw = "HJ 999900001111\n96716 ORG SPINACH 4.69\nXXXXXXXXXXXX0000 CHIP Read\n"
+    with books["db"].connect() as db:
+        db.execute("UPDATE receipt SET raw_text = ? WHERE id = ?", (raw, receipt_id))
+
+    shown: list[str] = []
+    real_insert = tk.Text.insert
+
+    def capture(self, index, text, *args):
+        shown.append(text)
+        return real_insert(self, index, text, *args)
+
+    monkeypatch.setattr(tk.Text, "insert", capture)
+
+    settings_store.save({"mask_sensitive": "1"})
+    page.refresh(select=receipt_id)
+    pump(window)
+    page.review.toggle_raw()
+    pump(window)
+    masked = "".join(shown)
+    assert "999900001111" not in masked, "the membership number reached the screen"
+    assert "0000" not in masked
+    assert "ORG SPINACH" in masked, "masking must not eat the words too"
+
+    shown.clear()
+    settings_store.save({"mask_sensitive": "0"})
+    page.refresh(select=receipt_id)
+    pump(window)
+    page.review.toggle_raw()
+    pump(window)
+    assert "999900001111" in "".join(shown), "turning it off must show the truth"

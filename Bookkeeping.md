@@ -974,7 +974,7 @@ when done, and check with
 | File | Lines | What it is |
 | --- | --- | --- |
 | `Bookkeeping.md` | this file | the whole documentation |
-| `VERSION` | 1 | `1.12.0` |
+| `VERSION` | 1 | `1.12.1` |
 | `README.md` | 200 | the public landing page: what it is, the measured accuracy, and the honest network boundary |
 | `docs/screenshots/*.png` | 4 files | the README's images, from demo books via `--tight`; `receipts.png` has its Payment field blurred after capture (see the note in `.gitignore`) |
 | `requirements.txt` | 38 | pinned to the versions actually installed and tested |
@@ -987,8 +987,8 @@ when done, and check with
 | `.gitignore` / `.gitattributes` | 95 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **every plausible receipt format** ignored — not just `.jpg`/`.png` but `.heic`, `.heif`, `.jfif`, `.webp`, `.avif`, `.bmp`, `.tif`, `.tiff`, `.pdf` — with the four README screenshots re-included **by name, not by directory**; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
 | `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
-| `app/ui/window.py` | 596 | the window: chrome, menus, navigation, poll loop, dialogs |
-| `app/ui/receipts.py` | 734 | receipt list and the review pane |
+| `app/ui/window.py` | 597 | the window: chrome, menus, navigation, poll loop, dialogs |
+| `app/ui/receipts.py` | 747 | receipt list and the review pane |
 | `app/ui/reports.py` | 356 | tiles, hand-drawn canvas charts, merchant table |
 | `app/ui/theme.py` | 361 | four palettes, display scaling, ttk styling, shared widgets |
 | `app/ui/settings_page.py` | 351 | recognition settings |
@@ -1003,7 +1003,7 @@ when done, and check with
 | `app/money.py` | 66 | integer-cent money conversion |
 | `app/images.py` | 66 | image normalisation (EXIF, downscale, PNG) |
 | `app/settings_store.py` | 60 | settings read/write, secret masking |
-| `app/extract/receipt_text.py` | 506 | shared: receipt text → `ExtractedReceipt` |
+| `app/extract/receipt_text.py` | 525 | shared: receipt text → `ExtractedReceipt` |
 | `app/extract/windows_ocr.py` | 367 | Windows OCR engine + word-box row reconstruction |
 | `app/extract/claude_vision.py` | 207 | Claude vision engine, pricing table, error mapping |
 | `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
@@ -1012,7 +1012,7 @@ when done, and check with
 | `app/lookup/product_names.py` | 282 | Open Food Facts + UPCitemdb, paced, time-boxed, failure-tolerant |
 | `app/lookup/__init__.py` | 132 | the barcode-name cache and the entry point the pipeline calls |
 | `app/lookup/upc.py` | 70 | UPC-A check digit; the repair a Walmart receipt needs |
-| `app/i18n.py` | 317 | interface language, the Chinese table, and the CJK font |
+| `app/i18n.py` | 318 | interface language, the Chinese table, and the CJK font |
 | `app/privacy.py` | 66 | masking the personal details a receipt carries — **display only** |
 | `app/lookup/translate.py` | 241 | item names into Chinese, cached; Google then MyMemory |
 | `tools/accuracy.py` | 237 | accuracy scoring: pure, no OCR, runs anywhere |
@@ -1023,8 +1023,8 @@ when done, and check with
 | `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
 | `tools/screenshot_pages.py` | 145 | opens the window and screenshots every page; `--tight` clips to the client area, which is **mandatory** for anything published |
 | `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
-| `tests/test_ui.py` | 617 | builds the real window and drives it |
-| `tests/test_units.py` | 642 | money, validation, precedence, OCR-text parsing |
+| `tests/test_ui.py` | 665 | builds the real window and drives it |
+| `tests/test_units.py` | 656 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
 | `tests/test_theme.py` | 160 | every palette's contrast and status-distinctness |
@@ -1038,7 +1038,7 @@ when done, and check with
 | `tests/fixtures/accuracy_baseline.json` | 134 | the baseline: what the code produced, for regression only |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
-13 131 lines of Python across the 51 tracked `.py` files. Not in version control: `data/` (the user's books),
+13 227 lines of Python across the 51 tracked `.py` files. Not in version control: `data/` (the user's books),
 `dist/` and `build/` (regenerable from the above).
 
 ---
@@ -1048,7 +1048,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 342 tests pass** (`pytest tests/ -q`, ~70 s):
+**Automated — 344 tests pass** (`pytest tests/ -q`, ~70 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -2171,6 +2171,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.12.1 | 2026-09-03 | **The masking option promised more than it covered, and the review caught it.** The settings text said it hides *“a card or **membership number**”*, but `SENSITIVE_FIELDS` held one entry, `payment_method`, and a membership number is not a field at all — `MEMBER` is in `_SUMMARY_WORDS`, so the line is discarded before anything stores it. The one place it *does* reach the screen is the **Engine output window**, which inserts the raw engine text verbatim; a Costco reading carries the membership number in its first five lines, with the card trailer just below (not reproduced here, for the reason the receipt photographs are gitignored). So the promise was false precisely where it mattered, and a user who read it, switched the option on and handed over the laptop got exactly the disclosure it undertook to prevent. **The worst class of wrong comment: trusted while false, about a privacy control.** Fixed by making the claim true rather than by weakening it — the raw pane now masks its digits and says so, with the full text one keystroke away. Masking every digit there costs the amounts too, accepted because it is an audit view rather than a working one. Also from the same review, and found independently by both reviewers: **`_cents_text` had the sign bug its own sibling documents**. `_amount_cents` carries a four-line docstring about `int("-0")` being 0, and then `_cents_text` rendered –15 cents as `-1.85`, because Python floors so `-15 // 100` is `-1` and `-15 % 100` is `85`. Reachable through a rate-breakdown line carrying a negative amount, which a refunded receipt prints. **Documenting a trap in one direction is not the same as handling it in both.** Plus four comment corrections: `privacy.py` pointed at `ReceiptsPage._collect` when the method is on `ReviewPane`; the surviving zero-tax guard lost its explanation when the special case around it was replaced; `_find_summary_amounts`'s “last matching line wins” needed its new tax exception; and `toggle_masking`'s “nothing stored changes” was ambiguous in a method whose first statement saves the setting. 344 tests. |
 | 1.12.0 | 2026-09-03 | **A third chain, and an option to hide what a receipt says about its owner.** Costco is structurally unlike Walmart and Aldi in one way that broke the parser outright: it charges **two tax rates on one receipt** (Maine's 5.5% general and 8% prepared food) and prints a component line for each. The rule that handled Aldi's zero-rate line only stopped a zero displacing a real figure, and its own comment predicted the gap — *“two genuinely non-zero rates would still take the last; no receipt seen here does that”*. COSTCO1 is that receipt, and it read the tax as **2.29 when 5.15 was charged**. Rate components are now summed, and a line that states the tax outright beats any breakdown. Two more failures in the same block: OCR drops the second word of `TOTAL TAX 5.15`, leaving a bare `TOTAL` that read as the grand total and reported a **$193.52 purchase as $5.15** — told apart now by arithmetic, since a TOTAL equal to the sum of the rate components above it is those components' total; and `AMOUNT: $193.52` from the approval block is accepted as a total, which matters because the grand-total line on this receipt was scribbled out on the paper. Separately, Windows OCR reads Costco's `Visa` tender line as `Vise`, so it escaped the payment words and was counted as a purchase carrying the grand total — **$193.52 of nothing, more than the receipt's own subtotal**. Net on COSTCO1: tax and total now correct, items 10 → 9 and their sum 315.57 → 122.05. Aldi and Walmart read identically to before, checked figure by figure. **Seven line items are still missed and the subtotal is still lost** — OCR returns `SUBT TRL` with no amount — which was deliberately left for a second pass; the remaining 66.32 gap is those seven items (66.26) plus one `5.99` misread as `5.93`. **The new option** shows the digits of a card or membership number as asterisks: `VISA ****4471` becomes `VISA ********`, keeping the brand while dropping the number. Costco prints the member number on every copy, so this is not hypothetical. On by default, because a privacy control that must be discovered protects only those who already knew to look, and the cost runs one way. Toggled from **View → Hide sensitive details**, **Ctrl+M**, or the Settings checkbox. It is **display only**, and the trap it had to avoid is specific: the review pane's entry boxes are the same widgets the save path reads back, so rendering a mask into one would have written asterisks into the database and destroyed the value the mask exists to protect. A masked field is shown read-only and its true value passes through the save untouched, pinned by `test_saving_a_masked_receipt_never_writes_the_mask_into_the_books`. Full Chinese for the new strings. 342 tests. |
 | 1.11.7 | 2026-09-03 | **Pinned a referent.** The 1.11.6 row said “its predecessor” without saying what that was. The thing 1.11.5 audited was the `.gitignore` comment block, which 1.11.4 had rewritten — not the 1.11.4 changelog row, which is what “predecessor” most naturally points at in a table of rows. A reader following the wrong referent would search the row above for a phrase that was never in it. Named explicitly instead. No code changed; 328 tests. |
 | 1.11.6 | 2026-09-03 | **Deleted a count.** The 1.11.5 row said the `.gitignore` note rewritten one round earlier was untrue of its own prose because “three present-tense clauses follow it”. That holds only if *clause* is read as *sentence*; by the ordinary sense there are more. Removed rather than corrected, because the row's point stands without a number and the number was the only part that could be wrong. Ends a run in which each fix explained itself into the next defect — the edit that stopped it was a deletion. No code changed; 328 tests. |

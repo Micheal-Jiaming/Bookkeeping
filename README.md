@@ -155,7 +155,7 @@ photo ──► engine (vision | Windows OCR | Tesseract)
 ```
 
 Python and Tkinter — no web framework, no browser, no GUI dependency to install. PyInstaller
-produces the single `.exe`. **342 tests**; 13,131 lines of Python across 51 files.
+produces the single `.exe`. **344 tests**; 13,227 lines of Python across 51 files.
 
 ![Categories and keyword rules, with the precedence order stated](docs/screenshots/rules.png)
 

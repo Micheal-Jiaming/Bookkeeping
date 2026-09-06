@@ -264,6 +264,9 @@ def _find_summary_amounts(lines: list[str]) -> dict[str, str]:
     contains both, so naive substring order would mislabel every one of them.
     The last amount on the line is the value; the last matching line wins,
     because receipts print the true total below any per-department subtotals.
+    **Tax is the exception**: a receipt may charge several rates and print one
+    component line each, so those are summed rather than overwritten, and a
+    line stating the tax outright then beats the sum.
     """
     found: dict[str, str] = {}
     # Per-rate tax lines, kept apart from the tax itself. Costco prints
@@ -299,7 +302,17 @@ def _find_summary_amounts(lines: list[str]) -> dict[str, str]:
                     if not tax_is_stated:
                         found["tax"] = _cents_text(sum(rate_parts))
             else:
-                # A line that states the tax outright beats any breakdown.
+                # A line that states a non-zero tax outright beats any
+                # breakdown.
+                #
+                # The zero test is defensive and predates the rate summing: it
+                # stops a bare "TAX 0.00" trailer overwriting a figure already
+                # found. **No fixture here exercises it**, and the obvious
+                # candidate does not: Aldi's "A-Taxable @0.00%" carries a
+                # percentage, so it is a rate component handled by the branch
+                # above and never reaches this one. It is kept for the receipt
+                # that prints a bare zero trailer *after* its real tax, which
+                # would otherwise report no tax at all.
                 if amount.strip("$ ").lstrip("-") not in ("0.00", "0") or "tax" not in found:
                     found["tax"] = amount
                     tax_is_stated = True
@@ -339,7 +352,17 @@ def _amount_cents(amount: str) -> int | None:
 
 
 def _cents_text(cents: int) -> str:
-    return f"{cents // 100}.{cents % 100:02d}"
+    """Integer cents back to a decimal string, negatives included.
+
+    Not simply ``f"{cents // 100}.{cents % 100:02d}"``. Python floors, so -15
+    // 100 is -1 and -15 % 100 is 85, and fifteen cents of refund renders as
+    "-1.85" -- the same sign trap ``_amount_cents`` above documents, reappearing
+    on the way back out. Reachable through a rate-breakdown line carrying a
+    negative amount, which a refunded receipt would print.
+    """
+    sign = "-" if cents < 0 else ""
+    cents = abs(cents)
+    return f"{sign}{cents // 100}.{cents % 100:02d}"
 
 
 def _trailing_amount_text(line: str) -> str | None:

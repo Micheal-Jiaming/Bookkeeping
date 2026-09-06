@@ -213,7 +213,8 @@ class MainWindow:
         """Flip the masking option and redraw, so the change is visible at once.
 
         The pages read the setting while building their widgets, so a rebuild is
-        what applies it; nothing stored changes either way.
+        what applies it. No receipt data changes either way -- the option itself
+        is saved, which is the one thing this does write.
         """
         settings_store.save({"mask_sensitive": "1" if self.mask_var.get() else "0"})
         self.refresh()

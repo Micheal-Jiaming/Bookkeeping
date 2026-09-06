@@ -19,7 +19,7 @@ feature existed: the review pane's entry boxes are the same widgets the save
 path reads back, so rendering a mask into one and then saving would write the
 asterisks into the database and destroy the value. The rule is that a masked
 field is shown read-only and its true value is passed through the save
-untouched -- see ``ReceiptsPage._collect``.
+untouched -- see ``ReviewPane._collect``.
 """
 
 from __future__ import annotations

@@ -74,6 +74,7 @@ CHINESE: dict[str, str] = {
     "Open data folder": "打开数据文件夹",
     "Open log file": "打开日志文件",
     "Hide sensitive details   Ctrl+M": "隐藏敏感信息   Ctrl+M",
+    "(digits hidden — Ctrl+M shows them)": "（数字已隐藏 — 按 Ctrl+M 显示）",
     "Hide sensitive details": "隐藏敏感信息",
     ("Shows the digits of a card or membership number as asterisks, so the "
      "app can be shown to somebody else without handing over what is printed "
