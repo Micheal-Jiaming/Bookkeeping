@@ -16,7 +16,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .. import i18n, lookup, pipeline, store
+from .. import i18n, lookup, pipeline, privacy, store
 from ..i18n import t
 from ..money import from_cents, to_cents
 from .theme import Button, Card, Pill, ScrollFrame, entry, field_label
@@ -396,15 +396,27 @@ class ReviewPane:
         grid = tk.Frame(parent, bg=theme["CARD"])
         grid.pack(side="left", fill="both", expand=True)
         self.vars: dict[str, tk.Variable] = {}
+        # True values of any field shown masked. The entry widgets are what the
+        # save path reads back, so without this the asterisks would be written
+        # into the database -- destroying the value the mask exists to protect.
+        self._masked: dict[str, str] = {}
 
         def text_field(row: int, column: int, key: str, label: str, value: str,
                        width: int = 18) -> None:
             cell = tk.Frame(grid, bg=theme["CARD"])
             cell.grid(row=row, column=column, sticky="ew", padx=(0, 12), pady=3)
             field_label(cell, theme, label).pack(fill="x")
-            variable = tk.StringVar(value=value or "")
+            shown = privacy.apply(key, value)
+            if shown != (value or ""):
+                # Masked: remember the truth and make the box read-only, so the
+                # mask cannot be edited into the books either by saving or by
+                # typing. Turning the option off puts the real value back.
+                self._masked[key] = value or ""
+            variable = tk.StringVar(value=shown)
             box = entry(cell, theme, width=width, textvariable=variable)
             box.pack(fill="x")
+            if key in self._masked:
+                box.configure(state="readonly")
             if key in ("subtotal", "tax", "tip", "total"):
                 box.bind("<KeyRelease>", lambda _e: self._update_sum())
             self.vars[key] = variable
@@ -611,7 +623,9 @@ class ReviewPane:
             tax_cents=to_cents(self.vars["tax"].get()),
             tip_cents=to_cents(self.vars["tip"].get()),
             total_cents=to_cents(self.vars["total"].get()),
-            payment_method=self.vars["payment_method"].get() or None,
+            # A masked field saves the value it was hiding, never the mask.
+            payment_method=(self._masked.get("payment_method")
+                            or self.vars["payment_method"].get() or None),
             category_id=self._category_id(self.category_box),
             notes=self.notes.get("1.0", "end").strip() or None,
             items=items,

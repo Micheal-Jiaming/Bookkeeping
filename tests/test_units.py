@@ -552,3 +552,91 @@ def test_the_real_payment_lines_are_still_recognised():
     for line in ("MCARD TEND 24.81", "CASH TEND 200.00", "CREDIT CARD $ 17.43",
                  "MASTERCARD- 0000 I 1", "VISA TEND 21.91"):
         assert _PAYMENT_RE.search(line.upper()), line
+
+
+# --- Costco: two tax rates, and a summary block OCR partly destroyed --------
+#
+# Costco charges two rates on one receipt (Maine: 5.5% general, 8% prepared
+# food) and prints a component line for each. Every earlier receipt here had a
+# single rate, and the rule that handled Aldi's zero-rate line only guarded
+# against a zero displacing a real figure -- its own comment predicted that two
+# genuinely non-zero rates would still take the last one. COSTCO1 is that
+# receipt, and it did: the tax read 2.29 when 5.15 was charged.
+
+def test_two_non_zero_tax_rates_are_summed_not_overwritten():
+    found = parse_receipt_text(
+        "SUBTOTAL 188.37\nA 5.500% TAX 2.86\nF 8.00% TAX 2.29\n")
+    assert found.tax == "5.15"
+
+
+def test_a_stated_tax_line_beats_the_rate_breakdown():
+    """A receipt that states the tax outright is believed over its components.
+
+    Ordering matters here: the components print *below* the stated line on a
+    Costco receipt, so a last-line-wins rule would take them.
+    """
+    found = parse_receipt_text(
+        "TAX 5.15\nA 5.500% TAX 2.86\nF 8.00% TAX 2.29\n")
+    assert found.tax == "5.15"
+
+
+def test_a_zero_rate_component_still_does_not_erase_the_tax():
+    """Aldi's case, which the replaced special case existed for."""
+    found = parse_receipt_text(
+        "SUBTOTAL 65.17\nB-Taxable @5.500% 0.15\nA-Taxable @0.00% 0.00\n")
+    assert found.tax == "0.15"
+
+
+def test_total_tax_is_not_read_as_the_grand_total():
+    """OCR drops the second word of "TOTAL TAX 5.15", leaving "TOTAL 5.15".
+
+    Nothing in the words can tell it from a grand total once TAX is gone, so it
+    is told apart by arithmetic: it equals the sum of the rate components above
+    it. On COSTCO1 this reported a $193.52 purchase as $5.15.
+    """
+    found = parse_receipt_text(
+        "AMOUNT: $193.52\nA 5.500% TAX 2.86\nF 8.00% TAX 2.29\nTOTAL 5.15\n")
+    assert found.total == "193.52"
+
+
+def test_a_total_equal_to_the_tax_survives_without_rate_lines():
+    """The guard above must not fire on a receipt that has no breakdown.
+
+    A receipt whose total genuinely equals its tax is absurd but possible; the
+    rule requires at least one rate component so ordinary receipts are untouched.
+    """
+    found = parse_receipt_text("TAX 5.15\nTOTAL 5.15\n")
+    assert found.total == "5.15"
+
+
+def test_costco_approval_amount_supplies_the_total():
+    """Costco prints no plain "TOTAL <amount>" the OCR can read on COSTCO1 --
+    the grand total line was scribbled out on the paper. The approval block's
+    "AMOUNT: $193.52" is the same figure and is now accepted."""
+    found = parse_receipt_text("AMOUNT: $193.52\nCHANGE 0.00\n")
+    assert found.total == "193.52"
+
+
+def test_a_misread_visa_tender_line_is_not_a_purchase():
+    """Windows OCR reads Costco's "Visa" as "Vise", so the tender line escaped
+    the payment words and was counted as an item carrying the grand total --
+    $193.52 of nothing, more than the receipt's own subtotal."""
+    found = parse_receipt_text(
+        "1199652 BUTER CROISS 5.99 F\nVise 193.52\nCHANGE 0.00\n")
+    assert [i.description for i in found.items] == ["BUTER CROISS"]
+
+
+def test_vise_matching_is_whole_word():
+    """The cost of the rule above must stay bounded: a product whose name
+    merely contains the letters is still a purchase."""
+    found = parse_receipt_text("VISEGRIP PLIERS 19.99\n")
+    assert [i.description for i in found.items] == ["VISEGRIP PLIERS"]
+
+
+def test_amount_cents_keeps_the_sign_of_a_small_refund():
+    """"-0.15" has a whole part of "-0", and int("-0") is 0 -- multiplying that
+    by 100 would drop the minus and turn a refund into a charge."""
+    from app.extract.receipt_text import _amount_cents
+    assert _amount_cents("-0.15") == -15
+    assert _amount_cents("0.15") == 15
+    assert _amount_cents("-2.00") == -200

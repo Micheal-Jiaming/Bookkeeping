@@ -496,3 +496,122 @@ def test_correcting_an_item_name_drops_its_barcode_expansion(window):
     corrected = review._collect().items[-1]
     assert corrected.description == "AIM TOOTHPASTE"
     assert corrected.raw_description is None, "the wrong expansion should go too"
+
+
+# --- hiding the personal details a real receipt carries ---------------------
+#
+# A Costco receipt prints the member's number on every copy and most card
+# receipts print a masked account number, so a screenshot of this app hands over
+# more than the books. The option shows those digits as asterisks. What makes it
+# worth testing rather than eyeballing is the save path: the review pane's entry
+# boxes are the same widgets the save reads back, so a mask rendered into one
+# would be written into the database as the value.
+
+def _stored_payment(books, receipt_id):
+    return books["store"].get_receipt(receipt_id)["payment_method"]
+
+
+def test_masking_shows_the_card_digits_as_asterisks(window, books):
+    from app import settings_store
+
+    settings_store.save({"mask_sensitive": "0"})
+    window.add_manual()
+    pump(window)
+    page = window.pages["receipts"]
+    receipt_id = page.selected
+    page.review.vars["payment_method"].set("VISA ****4471")
+    page.review.save_draft()
+    pump(window)
+    assert _stored_payment(books, receipt_id) == "VISA ****4471"
+
+    settings_store.save({"mask_sensitive": "1"})
+    page.refresh(select=receipt_id)
+    pump(window)
+    # The brand survives, every digit does not.
+    assert page.review.vars["payment_method"].get() == "VISA ********"
+
+
+def test_saving_a_masked_receipt_never_writes_the_mask_into_the_books(window, books):
+    """The defect this feature could most easily introduce, pinned.
+
+    Saving while a field is masked must store the value the mask was hiding.
+    """
+    from app import settings_store
+
+    settings_store.save({"mask_sensitive": "0"})
+    window.add_manual()
+    pump(window)
+    page = window.pages["receipts"]
+    receipt_id = page.selected
+    page.review.vars["payment_method"].set("VISA ****4471")
+    page.review.save_draft()
+    pump(window)
+
+    settings_store.save({"mask_sensitive": "1"})
+    page.refresh(select=receipt_id)
+    pump(window)
+    page.review.vars["merchant"].set("Costco")   # edit something else, then save
+    page.review.save_draft()
+    pump(window)
+
+    stored = books["store"].get_receipt(receipt_id)
+    assert stored["merchant"] == "Costco"
+    assert stored["payment_method"] == "VISA ****4471", "the mask reached the database"
+
+
+def test_turning_masking_off_brings_the_real_value_straight_back(window, books):
+    from app import settings_store
+
+    settings_store.save({"mask_sensitive": "0"})
+    window.add_manual()
+    pump(window)
+    page = window.pages["receipts"]
+    receipt_id = page.selected
+    page.review.vars["payment_method"].set("VISA ****4471")
+    page.review.save_draft()
+    pump(window)
+
+    settings_store.save({"mask_sensitive": "1"})
+    page.refresh(select=receipt_id)
+    pump(window)
+    assert "4471" not in page.review.vars["payment_method"].get()
+
+    settings_store.save({"mask_sensitive": "0"})
+    page.refresh(select=receipt_id)
+    pump(window)
+    assert page.review.vars["payment_method"].get() == "VISA ****4471"
+
+
+def test_masking_leaves_the_ordinary_fields_alone(window, books):
+    """Only the named sensitive fields are masked -- a date and a total have
+    digits too, and blanking them would make the option useless to work with."""
+    from app import settings_store
+
+    settings_store.save({"mask_sensitive": "1"})
+    window.add_manual()
+    pump(window)
+    page = window.pages["receipts"]
+    receipt_id = page.selected
+    page.review.vars["purchased_at"].set("2026-09-06")
+    page.review.vars["total"].set("193.52")
+    page.review.save_draft()
+    pump(window)
+    page.refresh(select=receipt_id)
+    pump(window)
+
+    assert page.review.vars["purchased_at"].get() == "2026-09-06"
+    assert page.review.vars["total"].get() == "193.52"
+
+
+def test_the_menu_toggle_flips_the_setting_and_redraws(window):
+    from app import privacy
+
+    window.mask_var.set(False)
+    window.toggle_masking()
+    pump(window)
+    assert privacy.masking_on() is False
+
+    window._toggle_masking_key()
+    pump(window)
+    assert privacy.masking_on() is True
+    assert window.mask_var.get() is True

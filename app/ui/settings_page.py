@@ -104,6 +104,21 @@ class SettingsPage:
                  anchor="w", justify="left",
                  wraplength=theme.px(420)).pack(fill="x")
 
+        self.mask_sensitive = tk.BooleanVar()
+        ttk.Checkbutton(
+            body, variable=self.mask_sensitive,
+            text=t("Hide sensitive details")).pack(anchor="w", pady=(8, 0))
+        tk.Label(body, text=t("Shows the digits of a card or membership number "
+                            "as asterisks, so the app can be shown to somebody "
+                            "else without handing over what is printed on the "
+                            "receipt. Display only — nothing stored changes, and "
+                            "turning this off brings the real value straight "
+                            "back. View → Hide sensitive details, or Ctrl+M, "
+                            "toggles it from anywhere."),
+                 bg=theme["CARD"], fg=theme["DIM"], font=theme.font(8),
+                 anchor="w", justify="left",
+                 wraplength=theme.px(420)).pack(fill="x")
+
         self.online_lookup = tk.BooleanVar()
         ttk.Checkbutton(
             body, variable=self.online_lookup,
@@ -196,6 +211,7 @@ class SettingsPage:
         self.ocr_language.set(values.get("ocr_language", "") or t(AUTO_LANGUAGE))
         self.tesseract.set(values.get("tesseract_cmd", ""))
         self.auto_confirm.set(values.get("auto_confirm_clean", "0") == "1")
+        self.mask_sensitive.set(values.get("mask_sensitive", "1") == "1")
         self.online_lookup.set(values.get("online_lookup", "1") == "1")
         self.translate_items.set(values.get("translate_items", "1") == "1")
         self.api_key.set("")
@@ -251,6 +267,7 @@ class SettingsPage:
                             else self.ocr_language.get().strip(),
             "tesseract_cmd": self.tesseract.get().strip(),
             "auto_confirm_clean": "1" if self.auto_confirm.get() else "0",
+            "mask_sensitive": "1" if self.mask_sensitive.get() else "0",
             "online_lookup": "1" if self.online_lookup.get() else "0",
             "translate_items": "1" if self.translate_items.get() else "0",
         }

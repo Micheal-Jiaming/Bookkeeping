@@ -431,6 +431,12 @@ DEFAULT_SETTINGS = {
     "ocr_language": "",               # Windows OCR language tag; "" picks English
     "tesseract_cmd": "",              # explicit path to tesseract.exe if not on PATH
     "auto_confirm_clean": "0",        # 1 = skip review when validation is clean
+    # 1 = show the digits of sensitive fields as asterisks. On by default: a
+    # receipt carries the shopper's card and membership numbers whether or not
+    # they thought about it, and the cost of the default being wrong only runs
+    # one way -- a hidden number is an inconvenience, a shown one is a
+    # disclosure. Display only; see app/privacy.py.
+    "mask_sensitive": "1",
     # 1 = expand abbreviated item names by looking their barcode up online.
     # On by default: a till's shorthand is the single least readable thing about
     # a scanned receipt, and the sources are free and keyless. Turning it off

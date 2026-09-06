@@ -112,11 +112,20 @@ _SUMMARY_WORDS = (
     "TAXI",
     # Aldi's summary block and card trailer.
     "TAXABLE", "AMOUNT", "ITEMS", "APPROVED", "TRACE", "CASHIER",
+    # "VISE" is Windows OCR reading Costco's "Visa" tender line, where the
+    # final 'a' comes back as an 'e'. Without it that line carries the grand
+    # total in the amount column and is counted as a purchase -- on COSTCO1 it
+    # put $193.52 of nothing into the items, more than the receipt's own
+    # subtotal. Listed explicitly, like TAXI above, so the repair is visible
+    # rather than hidden in a fuzzy match. The cost is that a genuine vise --
+    # Costco does sell tools -- would read as summary; accepted on the same
+    # grounds as TAXI, and it is a whole-word match so "VISEGRIP" is safe.
+    "VISE",
 )
 # Lines that hand over money, as opposed to the rest of the summary block.
 # TEND is here for Walmart's "MCARD TEND" and "CASH TEND".
-_PAYMENT_WORDS = ("MASTERCARD", "VISA", "AMEX", "DISCOVER", "DEBIT", "CREDIT",
-                  "CASH", "TEND", "PAYMENT", "CARD")
+_PAYMENT_WORDS = ("MASTERCARD", "VISA", "VISE", "AMEX", "DISCOVER", "DEBIT",
+                  "CREDIT", "CASH", "TEND", "PAYMENT", "CARD")
 
 
 def _whole_words(words) -> re.Pattern[str]:
@@ -257,6 +266,13 @@ def _find_summary_amounts(lines: list[str]) -> dict[str, str]:
     because receipts print the true total below any per-department subtotals.
     """
     found: dict[str, str] = {}
+    # Per-rate tax lines, kept apart from the tax itself. Costco prints
+    # "A 5.500% TAX 2.86" and "F 8.00% TAX 2.29" -- two components of one tax,
+    # not two candidate answers. Recognised by the percentage, which is what
+    # makes a line a rate breakdown rather than a total.
+    rate_parts: list[int] = []
+    tax_is_stated = False
+
     for line in lines:
         # The space-stripped form is checked too: Aldi letter-spaces its grand
         # total as "T O T A L", which contains the word only once collapsed.
@@ -271,19 +287,59 @@ def _find_summary_amounts(lines: list[str]) -> dict[str, str]:
         if says("SUBTOTAL", "SUB TOTAL"):
             found["subtotal"] = amount
         elif says("TAX"):
-            # A receipt may print one tax line per rate -- Aldi prints
-            # "B-Taxable @5.500%  0.15" and then "A-Taxable @0.00%  0.00". Last
-            # line wins everywhere else in this function, but here that would
-            # report no tax at all, so a zero never displaces a figure already
-            # found. Two genuinely non-zero rates would still take the last;
-            # no receipt seen here does that.
-            if amount.strip("$ ").lstrip("-") not in ("0.00", "0") or "tax" not in found:
-                found["tax"] = amount
+            if "%" in line:
+                # A component. Summing beats taking the last, which is what the
+                # previous rule did: on COSTCO1 that reported 2.29 as the whole
+                # tax when the receipt charged 5.15. Aldi's zero-rate line is
+                # handled by the same arithmetic -- 0.15 + 0.00 is still 0.15 --
+                # so this replaces the special case that only guarded zeroes.
+                cents = _amount_cents(amount)
+                if cents is not None:
+                    rate_parts.append(cents)
+                    if not tax_is_stated:
+                        found["tax"] = _cents_text(sum(rate_parts))
+            else:
+                # A line that states the tax outright beats any breakdown.
+                if amount.strip("$ ").lstrip("-") not in ("0.00", "0") or "tax" not in found:
+                    found["tax"] = amount
+                    tax_is_stated = True
         elif says("TIP", "GRATUITY"):
             found["tip"] = amount
-        elif says("TOTAL", "AMOUNT D", "BALANCE DUE"):
+        elif says("TOTAL", "AMOUNT D", "AMOUNT:", "BALANCE DUE"):
+            # "TOTAL TAX 5.15" arrives from OCR as a bare "TOTAL 5.15" when the
+            # second word is dropped, and then reads as the grand total -- which
+            # on COSTCO1 reported the receipt's $193.52 purchase as $5.15. It
+            # cannot be told apart by its words once TAX is gone, so it is told
+            # apart by arithmetic instead: a TOTAL equal to the sum of the rate
+            # components just seen is those components' total, not the amount
+            # charged. Requires at least one rate line, so an ordinary receipt
+            # whose total happens to equal its tax is untouched.
+            if rate_parts and _amount_cents(amount) == sum(rate_parts):
+                continue
             found["total"] = amount
     return found
+
+
+def _amount_cents(amount: str) -> int | None:
+    """Integer cents for a decimal string, or None if it is not one.
+
+    The sign is taken off the front and reapplied at the end rather than
+    carried through ``int(whole)``: "-0.15" has a whole part of "-0", and
+    ``int("-0")`` is 0, so multiplying it by 100 loses the minus and turns a
+    fifteen-cent refund into a fifteen-cent charge.
+    """
+    text = amount.strip("$ ")
+    negative = text.startswith("-")
+    try:
+        whole, _, frac = text.lstrip("+-").partition(".")
+        cents = int(whole or "0") * 100 + int((frac + "00")[:2])
+    except ValueError:
+        return None
+    return -cents if negative else cents
+
+
+def _cents_text(cents: int) -> str:
+    return f"{cents // 100}.{cents % 100:02d}"
 
 
 def _trailing_amount_text(line: str) -> str | None:

@@ -51,6 +51,7 @@ needed to run it), use `build.bat`.
 | **Categorise** | 15 categories and 176 seeded keyword rules, with an explicit precedence order — a value you set by hand always beats a rule, and item-name rules beat merchant-wide ones. Editable in the app. |
 | **Report** | Spend by category and by month, top merchants, tax paid, CSV export, arbitrary date ranges. |
 | **Speak** | Full English and Chinese interface, including machine-translated item names. |
+| **Hide** | A receipt carries its owner's card and membership numbers whether they thought about it or not. **View → Hide sensitive details** (or `Ctrl+M`) shows those digits as asterisks — `VISA ****4471` becomes `VISA ********` — so the app can be shown to somebody without handing over what is printed on the paper. On by default, and display-only: nothing stored changes. |
 
 ![The receipts page with the review pane open](docs/screenshots/receipts.png)
 
@@ -68,6 +69,7 @@ photo            items     sum   unacc arith | hdr    lines m/x/i   names
 ALDI1.jpg          11  49.72  15.45   BAD | (5/5)            -       -
 ALDI1_new.jpg      15  53.89  11.28    ok | (5/5)            -       -
 ALDI2.jpg           7  17.43   0.00    ok | (5/5)            -       -
+COSTCO1.jpg         9 122.05      -     - | (4/5)            -       -
 Walmart1.jpg       23 136.47   5.47    ok |   5/5       23/1/0   18/23
 Walmart2.jpg        3  23.52   0.00     - | (4/5)            -       -
 Walmart3.jpg        6   9.12  25.98    ok | (5/5)            -       -
@@ -116,6 +118,12 @@ error. The barcode lookup exists because nothing local can turn a till's `CLX PL
 "Clorox Plunger & Toilet Brush" — the words are simply not in the string. **It sends only the
 barcode printed beside an item, never the shop, the date, or the price.**
 
+Separately from the network question: the app can **hide the personal details a receipt carries**,
+showing the digits of a card or membership number as asterisks. It is on by default, toggled with
+`Ctrl+M`, and affects the display only — a masked field is shown read-only and its true value
+passes through a save untouched, which is asserted by a test, because writing the mask into the
+database would destroy exactly what it protects.
+
 If you supply an API key it is stored in this copy's own `data` folder and sent nowhere except
 Anthropic. **No key ships with this repository, and there is no server in the middle** — each
 install talks to Anthropic directly with its own key, so running this app cannot bill anyone
@@ -147,7 +155,7 @@ photo ──► engine (vision | Windows OCR | Tesseract)
 ```
 
 Python and Tkinter — no web framework, no browser, no GUI dependency to install. PyInstaller
-produces the single `.exe`. **328 tests**; 12,722 lines of Python across 50 files.
+produces the single `.exe`. **342 tests**; 13,131 lines of Python across 51 files.
 
 ![Categories and keyword rules, with the precedence order stated](docs/screenshots/rules.png)
 
@@ -159,8 +167,12 @@ Working and measured. Not finished, and the gaps are listed on purpose:
 
 - **Only 1 of 6 receipt photographs is transcribed by hand**, so the line-level accuracy above is
   a claim about one receipt. The other five are scored on self-consistency only.
-- **Two supermarket chains, tested.** It has never seen a restaurant or fuel receipt, which would
-  break several structural parsing assumptions.
+- **Three supermarket chains, tested** — Walmart, Aldi and Costco. It has never seen a restaurant
+  or fuel receipt, which would break several structural parsing assumptions.
+- **Costco is read only partly.** Its tax and total are now correct, but seven of sixteen line
+  items are missed and the subtotal is lost in OCR (`SUBTOTAL 188.37` comes back as `SUBT TRL`
+  with no amount). Costco was the first receipt here to charge **two tax rates at once**, which
+  broke the summary parser outright — see the 1.12.0 entry in `Bookkeeping.md`.
 - **ALDI resolves 0 of 18 product names**, and this one will not be fixed: ALDI prints internal
   article numbers rather than barcodes, so there is nothing for a barcode lookup to resolve. ALDI
   already prints readable names, so there is also nothing to expand.

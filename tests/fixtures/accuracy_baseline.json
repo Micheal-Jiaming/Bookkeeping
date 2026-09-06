@@ -57,6 +57,25 @@
         "nothing verified yet: self-checks only"
       ]
     },
+    "COSTCO1.jpg": {
+      "photo": "COSTCO1.jpg",
+      "items_read": 9,
+      "items_sum_cents": 12205,
+      "subtotal_cents": null,
+      "unaccounted_cents": null,
+      "arithmetic_ok": null,
+      "header_present": 4,
+      "truth_lines": false,
+      "header_checked": 0,
+      "header_correct": 0,
+      "lines_matched": 0,
+      "lines_missed": 0,
+      "lines_invented": 0,
+      "names_exact": 0,
+      "notes": [
+        "no truth record: self-checks only"
+      ]
+    },
     "Walmart1.jpg": {
       "photo": "Walmart1.jpg",
       "items_read": 23,

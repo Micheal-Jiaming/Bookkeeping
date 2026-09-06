@@ -18,7 +18,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 
-from .. import paths, pipeline, settings_store, store
+from .. import paths, pipeline, privacy, settings_store, store
 from ..db import DATA_DIR, init_db
 from ..extract import engine_status
 from ..i18n import LANGUAGES, t
@@ -189,6 +189,14 @@ class MainWindow:
                 label=name, value=code, variable=self._language_choice,
                 command=lambda c=code: self.set_language(c))
         view_menu.add_cascade(label=t("Language"), menu=language_menu)
+        # The masking switch lives in the menu beside Theme and Language
+        # because it is the same kind of thing: a property of what is shown,
+        # not of what is kept. Ctrl+M as well, so it can be flipped in one
+        # keystroke when somebody leans over to look at the screen.
+        self.mask_var = tk.BooleanVar(value=privacy.masking_on())
+        view_menu.add_checkbutton(
+            label=t("Hide sensitive details   Ctrl+M"),
+            variable=self.mask_var, command=self.toggle_masking)
         view_menu.add_command(label=t("Refresh   F5"), command=self.refresh)
         bar.add_cascade(label=t("View"), menu=view_menu)
 
@@ -201,7 +209,23 @@ class MainWindow:
 
         self.root.configure(menu=bar)
 
+    def toggle_masking(self) -> None:
+        """Flip the masking option and redraw, so the change is visible at once.
+
+        The pages read the setting while building their widgets, so a rebuild is
+        what applies it; nothing stored changes either way.
+        """
+        settings_store.save({"mask_sensitive": "1" if self.mask_var.get() else "0"})
+        self.refresh()
+
+    def _toggle_masking_key(self) -> None:
+        """Ctrl+M. The menu's checkbutton flips its own variable before calling
+        ``toggle_masking``; a key press has to do that part itself."""
+        self.mask_var.set(not self.mask_var.get())
+        self.toggle_masking()
+
     def _bind_keys(self) -> None:
+        self.root.bind("<Control-m>", lambda _e: self._toggle_masking_key())
         self.root.bind("<Control-o>", lambda _e: self.add_images())
         self.root.bind("<Control-v>", lambda _e: self.paste_image())
         self.root.bind("<Control-n>", lambda _e: self.add_manual())

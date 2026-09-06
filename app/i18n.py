@@ -73,6 +73,14 @@ CHINESE: dict[str, str] = {
     "Export line items to CSV…": "导出明细为 CSV…",
     "Open data folder": "打开数据文件夹",
     "Open log file": "打开日志文件",
+    "Hide sensitive details   Ctrl+M": "隐藏敏感信息   Ctrl+M",
+    "Hide sensitive details": "隐藏敏感信息",
+    ("Shows the digits of a card or membership number as asterisks, so the "
+     "app can be shown to somebody else without handing over what is printed "
+     "on the receipt. Display only — nothing stored changes, and turning "
+     "this off brings the real value straight back. View → Hide sensitive "
+     "details, or Ctrl+M, toggles it from anywhere."):
+        "将银行卡或会员号的数字显示为星号，这样就可以向他人展示本应用，而不会泄露小票上印的内容。仅影响显示，不改变已保存的数据；关闭后真实值会立即恢复。可通过“视图 → 隐藏敏感信息”或 Ctrl+M 随时切换。",
     "Refresh   F5": "刷新   F5",
     "Exit   Ctrl+Q": "退出   Ctrl+Q",
     "About ": "关于 ",
