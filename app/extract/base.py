@@ -104,6 +104,14 @@ class ExtractedReceipt(BaseModel):
         default=None,
         description="How it was paid, e.g. 'VISA ****1234', 'CASH', 'DEBIT'. Null if absent.",
     )
+    items_sold: int | None = Field(
+        default=None,
+        description=(
+            "The item count the receipt prints for itself, e.g. 'ITEMS SOLD 21' "
+            "or '18 ITEMS'. Copy the printed number; do not count the lines "
+            "yourself. Null if the receipt does not state one."
+        ),
+    )
     category: str | None = Field(
         default=None,
         description=(

@@ -25,11 +25,17 @@ from pathlib import Path
 from . import lookup, settings_store
 from .categorize import category_index, category_names, load_rules, resolve_category
 from .db import IMAGE_DIR, connect
-from .extract import ExtractionError, ExtractionResult, build_engines
-from .money import to_cents
+from .extract import (ExtractedItem, ExtractedReceipt, ExtractionError,
+                      ExtractionResult, build_engines)
+from .lookup import shorthand
+from .money import from_cents, to_cents
 from .validate import check
 
 log = logging.getLogger("bookkeeping.pipeline")
+
+# ``line_item.name_source`` for a line whose barcode was looked up and came
+# back with nothing. Distinct from NULL, which means nothing was ever asked.
+NOT_FOUND = "notfound"
 
 MAX_WORKERS = 2
 _executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="scan")
@@ -119,46 +125,174 @@ def scan_now(receipt_id: int) -> dict:
         _set_status(receipt_id, "failed", error=" | ".join(attempts))
         return _fetch(receipt_id)
 
-    _expand_item_names(result, settings)
+    name_sources = _expand_item_names(result, settings)
     _translate_item_names(result, settings)
-    _store_result(receipt_id, result, fallback_notes=attempts)
+    _store_result(receipt_id, result, fallback_notes=attempts,
+                  name_sources=name_sources)
     return _fetch(receipt_id)
 
 
-def _expand_item_names(result: ExtractionResult, settings: dict[str, str]) -> int:
+def submit_enrich(receipt_id: int) -> bool:
+    """Queue the lookup-and-translate pass for a receipt just edited by hand.
+
+    Returns False if that receipt is already busy, so a second save while the
+    first pass is still running does not start two writers on the same rows.
+    """
+    with _in_flight_lock:
+        if receipt_id in _in_flight:
+            return False
+        _in_flight.add(receipt_id)
+    _executor.submit(_run_enrich, receipt_id)
+    return True
+
+
+def _run_enrich(receipt_id: int) -> None:
+    try:
+        enrich_now(receipt_id)
+    except Exception:  # a worker thread that dies silently is a debugging hole
+        log.exception("Enriching receipt %s crashed", receipt_id)
+    finally:
+        with _in_flight_lock:
+            _in_flight.discard(receipt_id)
+
+
+def enrich_now(receipt_id: int) -> dict[str, int]:
+    """Look up and translate the lines of a receipt already in the books.
+
+    **Why this is not part of the scan.** A line the reviewer typed or corrected
+    never went through a scan, so nothing had ever offered it a product name or
+    a translation -- a hand-added "DOVE BW 11OZ" sat blank for ever, and the
+    user reported it as the application ignoring what they had entered. It was
+    not ignoring it; it had never been asked.
+
+    Runs the same two passes a scan runs, over the stored rows instead of a
+    fresh reading, and writes back only the expansion and where it came from.
+    Amounts, categories, the reviewer's own edits and the receipt's status are
+    left exactly as they are: this fills in blanks, it does not re-read
+    anything. In particular a confirmed receipt stays confirmed.
+
+    Synchronous and safe to call directly (the tests do). Returns a small tally
+    for the log and for callers that want to say what happened.
+    """
+    settings = settings_store.get_all()
+    with connect() as db:
+        row = db.execute("SELECT * FROM receipt WHERE id = ?", (receipt_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"No receipt {receipt_id}")
+        stored = db.execute(
+            "SELECT id, description, raw_description, name_source, sku, amount_cents "
+            "FROM line_item WHERE receipt_id = ? ORDER BY line_no ASC, id ASC",
+            (receipt_id,)).fetchall()
+
+    receipt = ExtractedReceipt(
+        currency=row["currency"] or "USD",
+        merchant=row["merchant"] or row["merchant_raw"],
+        items=[ExtractedItem(description=item["description"] or "",
+                             readable_name=item["raw_description"],
+                             sku=item["sku"],
+                             amount=from_cents(item["amount_cents"]))
+               for item in stored],
+    )
+    result = ExtractionResult(receipt=receipt, engine=row["engine"] or "manual")
+
+    sources = _expand_item_names(result, settings)
+    translated = _translate_item_names(result, settings)
+
+    written = 0
+    with connect() as db:
+        for index, item in enumerate(receipt.items):
+            source = sources.get(index)
+            if source is None:
+                continue
+            name = item.readable_name if source != NOT_FOUND else None
+            if (name or None) == (stored[index]["raw_description"] or None)                     and source == stored[index]["name_source"]:
+                continue
+            db.execute(
+                "UPDATE line_item SET raw_description = ?, name_source = ? WHERE id = ?",
+                (name, source, stored[index]["id"]))
+            written += 1
+
+    tally = {"lines": len(stored), "named": written, "translated": translated}
+    if written or translated:
+        log.info("Enriched receipt %s: %d name(s) written, %d translation(s)",
+                 receipt_id, written, translated)
+    return tally
+
+
+def _expand_item_names(
+    result: ExtractionResult, settings: dict[str, str]
+) -> dict[int, str]:
     """Fill in plain-English names for lines whose printed name is shorthand.
 
     Runs between reading and storing so the expansion is available to category
     matching as well as to the reviewer -- ``resolve_category`` searches the
     readable name too, which is how ``CLX PLNGR`` reaches Household at all.
 
+    Two sources, in this order. A barcode catalogue names the actual product and
+    is tried first. Where the receipt prints no barcode to try -- every line of a
+    Costco receipt, because the number beside it is Costco's own item number --
+    ``shorthand.expand`` unpicks the abbreviations from the printed text alone.
+
     Only ever fills a blank. A name the vision model supplied stays: it was
-    produced from the receipt in front of it, including context a barcode
-    catalogue does not have, so it is the better of the two.
+    produced from the receipt in front of it, including context neither of these
+    has, so it is the better of the three.
+
+    Returns which lines were filled here and by what, keyed by position in
+    ``result.receipt.items``, so the review pane can tell the reader where a name
+    came from instead of claiming all of them came from a barcode.
     """
-    missing = [item for item in result.receipt.items
+    merchant = result.receipt.merchant or ""
+    missing = [(index, item) for index, item in enumerate(result.receipt.items)
                if not (item.readable_name or "").strip()]
     if not missing:
-        return 0
+        return {}
 
+    asked = True
     try:
         names = lookup.names_for_skus(
-            [item.sku for item in missing],
+            [item.sku for _, item in missing],
             enabled=settings.get("online_lookup", "1") == "1",
         )
     except Exception:  # offline, DNS down, a service changing shape
+        # Not a return: the shorthand pass below reads the printed text and
+        # never touches the network, so it still has something to offer on a
+        # machine where the lookup could not run at all.
+        #
+        # ``asked`` stays False so nothing here is recorded as NOT_FOUND. A
+        # service that could not be reached has told us nothing about whether
+        # the product exists, and writing "no product name found" against the
+        # line would state as fact something we do not know -- and would stop
+        # the next save from trying again.
         log.exception("Product name lookup failed; keeping the printed names")
-        return 0
+        names = {}
+        asked = False
 
-    filled = 0
-    for item in missing:
+    sources: dict[int, str] = {}
+    for index, item in missing:
         name = names.get(item.sku or "")
         if name:
             item.readable_name = name
-            filled += 1
+            sources[index] = "barcode"
+            continue
+        local = shorthand.expand(item.description or "", merchant)
+        if local:
+            item.readable_name = local
+            sources[index] = "shorthand"
+        elif asked and lookup.barcode_for(item.sku):
+            # A question was asked and nobody had an answer, which is not the
+            # same as never having asked. Recorded so the review pane can say
+            # so: a line that simply sits blank looks like the application not
+            # bothering, and the user reported it as exactly that.
+            sources[index] = NOT_FOUND
+
+    filled = {index: source for index, source in sources.items()
+              if source != NOT_FOUND}
     if filled:
-        log.info("Expanded %d of %d abbreviated item name(s)", filled, len(missing))
-    return filled
+        by_barcode = sum(1 for source in filled.values() if source == "barcode")
+        log.info("Expanded %d of %d abbreviated item name(s): %d from a barcode, "
+                 "%d from receipt shorthand",
+                 len(filled), len(missing), by_barcode, len(filled) - by_barcode)
+    return sources
 
 
 def _translate_item_names(result: ExtractionResult, settings: dict[str, str]) -> int:
@@ -194,9 +328,15 @@ def _translate_item_names(result: ExtractionResult, settings: dict[str, str]) ->
 
 
 def _store_result(
-    receipt_id: int, result: ExtractionResult, fallback_notes: list[str]
+    receipt_id: int,
+    result: ExtractionResult,
+    fallback_notes: list[str],
+    name_sources: dict[int, str] | None = None,
 ) -> None:
     receipt = result.receipt
+    # A line carrying an expansion that this scan did not produce got it from the
+    # vision model, which is the only other thing that fills the field.
+    filled_by = name_sources or {}
     with connect() as db:
         rules = load_rules(db)
         by_name = category_index(db)
@@ -217,6 +357,10 @@ def _store_result(
                     "line_no": index,
                     "description": description,
                     "raw_description": item.readable_name,
+                    "name_source": (
+                        filled_by.get(index)
+                        or ("model" if item.readable_name else None)
+                    ),
                     "sku": item.sku,
                     "quantity": item.quantity,
                     "unit_price_cents": to_cents(item.unit_price),
@@ -251,6 +395,7 @@ def _store_result(
             items=items,
             confidence=receipt.confidence,
             duplicate_of=duplicate_of,
+            items_sold=receipt.items_sold,
         )
         if fallback_notes:
             flags.append(
@@ -265,7 +410,8 @@ def _store_result(
             UPDATE receipt SET
                 status = ?, merchant = ?, merchant_raw = ?, purchased_at = ?,
                 currency = ?, subtotal_cents = ?, tax_cents = ?, tip_cents = ?,
-                total_cents = ?, payment_method = ?, category_id = ?, notes = ?,
+                total_cents = ?, payment_method = ?, items_sold = ?,
+                category_id = ?, notes = ?,
                 engine = ?, model = ?, confidence = ?, raw_text = ?,
                 raw_response = ?, review_flags = ?, extract_ms = ?,
                 input_tokens = ?, output_tokens = ?, cost_usd = ?, error = NULL,
@@ -283,6 +429,7 @@ def _store_result(
                 to_cents(receipt.tip),
                 total_cents,
                 receipt.payment_method,
+                receipt.items_sold,
                 header_category_id,
                 receipt.notes,
                 result.engine,
@@ -304,16 +451,18 @@ def _store_result(
             db.execute(
                 """
                 INSERT INTO line_item (
-                    receipt_id, line_no, description, raw_description, sku,
+                    receipt_id, line_no, description, raw_description,
+                    name_source, sku,
                     quantity, unit_price_cents, amount_cents, category_id,
                     category_source, is_discount, taxable
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     receipt_id,
                     item["line_no"],
                     item["description"],
                     item["raw_description"],
+                    item["name_source"],
                     item["sku"],
                     item["quantity"],
                     item["unit_price_cents"],

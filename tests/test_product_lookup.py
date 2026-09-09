@@ -5,7 +5,7 @@ an HTTP request -- is replaced with a scripted answer, which is enough to
 exercise every parser, the fallback between sources, the rate-limit path and the
 cache. The one thing that cannot be covered this way is whether Open Food Facts
 and UPCitemdb still return the shapes assumed here; that was measured by hand
-against the real services and is recorded in Bookkeeping.md section 9.
+against the real services and is recorded in Bookkeeping_record.md section 9.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.lookup import names_for_skus  # noqa: E402
 from app.lookup import product_names as pn  # noqa: E402
 from app.lookup.upc import barcode_for, check_digit, is_valid  # noqa: E402
+from app.store import ItemEdit, ReceiptEdit  # noqa: E402
 
 # Printed on the receipt, and the barcode it actually stands for. Walmart prints
 # the first eleven digits and pads column twelve with a zero, so all but the
@@ -340,7 +341,7 @@ def test_expansion_fills_blanks_without_overwriting_the_model(books, monkeypatch
         input_tokens=0, output_tokens=0, cost_usd=0.0, elapsed_ms=1)
 
     filled = books["pipeline"]._expand_item_names(result, {"online_lookup": "1"})
-    assert filled == 1
+    assert filled == {0: "barcode"}, "line 1 was filled from a catalogue; line 2 not at all"
     assert result.receipt.items[0].readable_name == "Clorox Plunger & Toilet Brush"
     assert (result.receipt.items[1].readable_name
             == "Great Value 1 gallon spring water"), "the model's own name wins"
@@ -361,5 +362,178 @@ def test_a_lookup_failure_never_breaks_a_scan(books, monkeypatch):
         engine="stub", model="stub-1", raw_response="{}",
         input_tokens=0, output_tokens=0, cost_usd=0.0, elapsed_ms=1)
 
-    assert books["pipeline"]._expand_item_names(result, {"online_lookup": "1"}) == 0
+    # "CLX PLNGR" holds no abbreviation the shorthand table knows, and the
+    # merchant is blank, so nothing fills the gap once the lookup has thrown.
+    #
+    # Empty rather than {0: "notfound"} on purpose: the line does carry a
+    # resolvable barcode, but the service never answered, so nothing was learned
+    # about whether the product exists. Recording a miss would show the reviewer
+    # "no product name found" -- a claim about the catalogue, made because the
+    # network was down -- and would stop the next save from trying again.
+    assert books["pipeline"]._expand_item_names(result, {"online_lookup": "1"}) == {}
     assert result.receipt.items[0].readable_name is None
+
+
+# ------------------------------------- the offline expansion, and its label
+
+def test_receipt_shorthand_is_expanded_when_no_barcode_can_be(books, monkeypatch):
+    """Costco's item numbers are not barcodes, so the catalogue path is dead.
+
+    ``barcode_for`` correctly declines every one of them, which used to mean the
+    line kept its printed shorthand and the Chinese translation was made from
+    that -- "BUTER CROISS" came back as 黄油克罗斯.
+    """
+    from app.extract import ExtractedItem, ExtractedReceipt, ExtractionResult
+
+    result = ExtractionResult(
+        receipt=ExtractedReceipt(
+            currency="USD", merchant="Costco", total="9.78", confidence=0.4,
+            items=[
+                ExtractedItem(description="BUTER CROISS", sku="1199652", amount="5.99"),
+                ExtractedItem(description="SHRIMP", sku="16790", amount="3.79"),
+            ]),
+        engine="stub", model="stub-1", raw_response="{}",
+        input_tokens=0, output_tokens=0, cost_usd=0.0, elapsed_ms=1)
+
+    sources = books["pipeline"]._expand_item_names(result, {"online_lookup": "0"})
+
+    assert sources == {0: "shorthand"}, "the plain-English line needed nothing"
+    assert result.receipt.items[0].readable_name == "Butter Croissants"
+    assert result.receipt.items[1].readable_name is None
+
+
+def test_a_shorthand_expansion_is_not_labelled_as_a_barcode(books, monkeypatch):
+    """The pane says where a name came from, and the two differ in trust.
+
+    A barcode name is only as good as the digits OCR read off the photograph; a
+    shorthand expansion only rewrites what the receipt printed. Recording which
+    is which is the point of the column.
+    """
+    from app.extract import ExtractedItem, ExtractedReceipt, ExtractionResult
+
+    result = ExtractionResult(
+        receipt=ExtractedReceipt(
+            currency="USD", merchant="Costco", total="5.99", confidence=0.4,
+            items=[ExtractedItem(description="KS COFFEE", sku="17767", amount="5.99")]),
+        engine="stub", model="stub-1", raw_response="{}",
+        input_tokens=0, output_tokens=0, cost_usd=0.0, elapsed_ms=1)
+
+    receipt_id = books["store"].create_manual()
+    sources = books["pipeline"]._expand_item_names(result, {"online_lookup": "0"})
+    books["pipeline"]._store_result(receipt_id, result, fallback_notes=[],
+                                    name_sources=sources)
+
+    item = books["store"].get_receipt(receipt_id)["items"][0]
+    assert item["raw_description"] == "Kirkland Signature Coffee"
+    assert item["name_source"] == "shorthand"
+
+
+def test_an_expansion_the_model_supplied_is_labelled_as_the_model(books):
+    """Nothing in this scan filled it, so the vision model did."""
+    from app.extract import ExtractedItem, ExtractedReceipt, ExtractionResult
+
+    result = ExtractionResult(
+        receipt=ExtractedReceipt(
+            currency="USD", merchant="Costco", total="5.99", confidence=0.9,
+            items=[ExtractedItem(description="KS COFFEE", sku="17767", amount="5.99",
+                                 readable_name="Kirkland Signature Colombian Coffee")]),
+        engine="stub", model="stub-1", raw_response="{}",
+        input_tokens=0, output_tokens=0, cost_usd=0.0, elapsed_ms=1)
+
+    receipt_id = books["store"].create_manual()
+    sources = books["pipeline"]._expand_item_names(result, {"online_lookup": "0"})
+    books["pipeline"]._store_result(receipt_id, result, fallback_notes=[],
+                                    name_sources=sources)
+
+    assert books["store"].get_receipt(receipt_id)["items"][0]["name_source"] == "model"
+
+
+# ------- looking up a line the reviewer typed, after the fact (1.16.0)
+#
+# Reported from a screenshot: two lines on a confirmed receipt had nothing
+# underneath them. They failed for different reasons, and both are covered here.
+
+def test_a_line_added_by_hand_is_looked_up_on_demand(books, monkeypatch):
+    """It was never ignored -- it had never been asked about.
+
+    Expansion and translation only ever ran during a scan, so a line typed into
+    the review pane afterwards went through neither, for ever.
+    """
+    body = json.dumps({"items": [{"title": "Dove Body Wash 11 oz"}]})
+    _scripted(monkeypatch, {"openfoodfacts": (404, ""), "upcitemdb": (200, body)})
+    store, pipeline = books["store"], books["pipeline"]
+
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-08-18", total_cents=547, merchant="Walmart",
+        items=[ItemEdit(description="DOVE BW 11OZ", amount_cents=547,
+                        sku="011111610118")]))
+    assert store.get_receipt(receipt_id)["items"][0]["raw_description"] is None
+
+    pipeline.enrich_now(receipt_id)
+
+    item = store.get_receipt(receipt_id)["items"][0]
+    assert item["raw_description"] == "Dove Body Wash 11 oz"
+    assert item["name_source"] == "barcode"
+
+
+def test_a_line_nobody_can_name_is_recorded_as_asked_and_unknown(books, monkeypatch):
+    """The other half of the report: say so, rather than leaving it blank.
+
+    A blank line is indistinguishable from the application not having bothered,
+    which is exactly how it was read.
+    """
+    _scripted(monkeypatch, {"openfoodfacts": (404, ""), "upcitemdb": (404, "")})
+    store, pipeline = books["store"], books["pipeline"]
+
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-08-18", total_cents=494,
+        items=[ItemEdit(description="EQJELLUBE80Z", amount_cents=494,
+                        sku="194346600820")]))
+    pipeline.enrich_now(receipt_id)
+
+    item = store.get_receipt(receipt_id)["items"][0]
+    assert item["raw_description"] is None
+    assert item["name_source"] == pipeline.NOT_FOUND
+
+
+def test_enriching_leaves_everything_the_reviewer_decided_alone(books, monkeypatch):
+    """It fills blanks. It does not re-read, re-categorise or un-confirm."""
+    body = json.dumps({"items": [{"title": "Dove Body Wash 11 oz"}]})
+    _scripted(monkeypatch, {"openfoodfacts": (404, ""), "upcitemdb": (200, body)})
+    store, pipeline = books["store"], books["pipeline"]
+    groceries = {c["name"]: c["id"] for c in store.list_categories()}["Groceries"]
+
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-08-18", total_cents=547,
+        items=[ItemEdit(description="DOVE BW 11OZ", amount_cents=547,
+                        sku="011111610118", category_id=groceries,
+                        category_source="manual")]), confirm=True)
+
+    pipeline.enrich_now(receipt_id)
+
+    receipt = store.get_receipt(receipt_id)
+    assert receipt["status"] == "confirmed", "enriching must not un-confirm"
+    item = receipt["items"][0]
+    assert item["category_id"] == groceries
+    assert item["category_source"] == "manual"
+    assert item["amount_cents"] == 547
+    assert item["description"] == "DOVE BW 11OZ"
+
+
+def test_a_name_the_reviewer_already_has_is_not_looked_up_again(books, monkeypatch):
+    calls = _scripted(monkeypatch, {"upcitemdb": (200, json.dumps({"items": []}))})
+    store, pipeline = books["store"], books["pipeline"]
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-08-18", total_cents=547,
+        items=[ItemEdit(description="DOVE BW 11OZ", amount_cents=547,
+                        sku="011111610118",
+                        raw_description="Dove Body Wash", name_source="barcode")]))
+
+    pipeline.enrich_now(receipt_id)
+
+    assert calls == [], "nothing to fill in, so nothing to ask"
+    assert store.get_receipt(receipt_id)["items"][0]["raw_description"] == "Dove Body Wash"

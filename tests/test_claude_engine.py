@@ -8,7 +8,7 @@ structured-output schema, effort), the parsing of a well-formed reply, and the
 translation of API failures into messages a user can act on.
 
 What these tests do NOT prove: that the model reads real receipts accurately.
-Nothing offline can prove that -- see the verification notes in Bookkeeping.md.
+Nothing offline can prove that -- see the verification notes in Bookkeeping_record.md.
 """
 
 from __future__ import annotations

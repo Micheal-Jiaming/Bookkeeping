@@ -21,7 +21,7 @@ which is the shape ``receipt_text.parse_receipt_text`` already knows how to
 read.
 
 Two decisions here came from measurement rather than taste, and are recorded in
-Bookkeeping.md -- the row tolerance in section 2, the preprocessing result in
+Bookkeeping_record.md -- the row tolerance in section 2, the preprocessing result in
 section 10:
 
 * **The row tolerance is half the median word height**, which is the constant
@@ -49,7 +49,7 @@ from pathlib import Path
 
 from ..money import to_cents
 from .base import ExtractionError, ExtractionResult, Extractor
-from .receipt_text import parse_receipt_text
+from .receipt_text import is_known_merchant, parse_receipt_text
 
 log = logging.getLogger("bookkeeping.ocr")
 
@@ -76,7 +76,7 @@ MAX_REPORTED_CONFIDENCE = 0.5
 #
 # An earlier attempt simply replaced the full-size read with the smaller one and
 # had to be reverted, because more line items is not worth losing the total --
-# see Bookkeeping.md 11.32. Reading both is what makes the smaller size usable.
+# see Bookkeeping_record.md 11.32. Reading both is what makes the smaller size usable.
 SECOND_PASS_EDGE = 1176
 
 
@@ -128,9 +128,21 @@ def merge_readings(primary, secondary):
         return primary
 
     for field in ("merchant", "merchant_raw", "purchased_at", "payment_method",
-                  "subtotal", "tax", "tip", "total"):
+                  "items_sold", "subtotal", "tax", "tip", "total"):
         if not getattr(primary, field) and getattr(secondary, field):
             setattr(primary, field, getattr(secondary, field))
+
+    # The merchant needs more than "fill it in if it is empty", because it is
+    # never empty: when the logo is unreadable the parser falls back to whatever
+    # the top line held, which on the Costco photograph is the street address.
+    # That is a value, so the loop above would keep it and discard the "Costco"
+    # the other pass genuinely recognised. A named shop therefore wins over a
+    # guess whichever pass found it -- and only over a guess, so two passes that
+    # both recognised a shop leave the primary's answer alone.
+    if (not is_known_merchant(primary.merchant)
+            and is_known_merchant(secondary.merchant)):
+        primary.merchant = secondary.merchant
+        primary.merchant_raw = secondary.merchant_raw
 
     near_primary = _shortfall(primary.items, primary.subtotal)
     near_secondary = _shortfall(secondary.items, primary.subtotal)
@@ -178,25 +190,50 @@ class Word:
     def centre_y(self) -> float:
         return self.y + self.height / 2
 
+    @property
+    def centre_x(self) -> float:
+        return self.x + self.width / 2
 
-def group_rows(words: list[Word], tolerance: float = ROW_TOLERANCE) -> list[list[Word]]:
+
+def group_rows(words: list[Word], tolerance: float = ROW_TOLERANCE,
+               skew: float = 0.0) -> list[list[Word]]:
     """Group words into printed rows by vertical position, left to right.
 
     Pure function so the layout logic can be tested without Windows OCR. The
     running centre is re-averaged as each word joins, which keeps a row from
     drifting upwards across a receipt that curves away from the camera.
+
+    ``skew`` is the page's text slope in y per x, and rows are grouped along
+    that baseline rather than along a horizontal one. **A photograph taken by
+    hand is never quite square**, and on a receipt the error is magnified by the
+    shape of the paper: the columns sit a long way apart, so a slope far too
+    small to see tips a whole line by the time it reaches the far edge.
+    Measured on ALDI1_new, a slope of 0.025 -- one and a half degrees -- drifts
+    31 px across the page against a row pitch of 51, so the item number at the
+    left of one line sits closer to the row above it than to its own. Three item
+    names came out carrying the flag letters of their neighbour, and one line
+    was lost entirely.
+
+    Left at zero the behaviour is exactly what it was, which is what the two
+    engines that cannot measure an angle rely on: Windows OCR and Tesseract both
+    return upright rectangles, and estimating the slope from box positions alone
+    is not safe -- a receipt's columns are regularly spaced, so a shear that maps
+    one column onto the *next row down* looks just as tidy as the true one. Only
+    RapidOCR reports the tilt of the text itself, and only it passes a value
+    here.
     """
     if not words:
         return []
+    baseline = lambda w: w.centre_y - skew * w.centre_x  # noqa: E731
     limit = statistics.median(word.height for word in words) * tolerance
     rows: list[tuple[float, list[Word]]] = []
-    for word in sorted(words, key=lambda w: w.centre_y):
-        if rows and abs(word.centre_y - rows[-1][0]) <= limit:
+    for word in sorted(words, key=baseline):
+        if rows and abs(baseline(word) - rows[-1][0]) <= limit:
             centre, members = rows[-1]
             members.append(word)
-            rows[-1] = (sum(m.centre_y for m in members) / len(members), members)
+            rows[-1] = (sum(baseline(m) for m in members) / len(members), members)
         else:
-            rows.append((word.centre_y, [word]))
+            rows.append((baseline(word), [word]))
     return [sorted(members, key=lambda w: w.x) for _, members in rows]
 
 

@@ -16,7 +16,7 @@ Layout:
 The interface never touches SQL and the store never touches a widget; that
 separation is what let the interface be replaced without rewriting the logic.
 
-See Bookkeeping.md in the project root for the full design and history.
+See Bookkeeping_record.md in the project root for the full design and history.
 """
 
 __all__ = ["launcher", "pipeline", "store", "ui"]

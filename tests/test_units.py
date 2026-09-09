@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.categorize import Rule, match_rules, resolve_category  # noqa: E402
@@ -300,6 +302,14 @@ def test_a_name_that_really_ends_in_one_letter_is_left_alone():
 # These are transcriptions of the printed text rather than OCR output, so they
 # test the parser and not the recognition stage. Both exposed a defect the
 # original receipt did not: see 11.29 and 11.30.
+#
+# **The card and transaction identifiers here are invented**, and must stay
+# invented: the transaction certificate, the reference number and the card's
+# last four digits are the receipt's own record of who paid, and nothing in
+# these tests needs their real values -- what is being tested is that a line of
+# that *shape* is recognised as summary rather than as a purchase. The real ones
+# were transcribed in by hand and reached the public repository before anybody
+# noticed; see §11.57.
 
 WALMART_NAMELESS_ITEM = """\
 Walmart
@@ -654,3 +664,533 @@ def test_cents_text_keeps_the_sign_of_a_small_refund():
     assert _cents_text(0) == "0.00"
     for cents in (-201, -15, -1, 0, 1, 515, 19352):
         assert _amount_cents(_cents_text(cents)) == cents
+
+
+# ------------------------------------------------- a logo OCR read badly
+
+def test_a_misread_store_logo_is_still_recognised():
+    """The Costco photograph reads as "Cosrco" -- one wrong letter in the logo.
+
+    Before this, an exact search found nothing and the merchant fell through to
+    the street address printed underneath, which is what a reviewer then saw in
+    the Merchant field.
+    """
+    from app.extract.receipt_text import _find_merchant
+    _raw, merchant = _find_merchant(
+        ["Cosrco", "455 Anywhere Rd", "S Portland, ME 04074", "SELF-CHECKOUT"])
+    assert merchant == "Costco"
+
+
+def test_a_short_name_is_never_matched_loosely():
+    """SHELF is one edit from SHELL, and a shelf is not a filling station.
+
+    This is why the tolerant pass is restricted to names of six characters or
+    more: below that, one character of difference is simply a different word.
+    """
+    from app.extract.receipt_text import _find_merchant
+    _raw, merchant = _find_merchant(["SHELF PULL CLEARANCE", "123 Main St"])
+    assert merchant != "Shell"
+
+
+def test_two_characters_wrong_is_matched_only_on_the_same_shape():
+    """"Cesrco" is what the app really gets, so two errors have to be reachable.
+
+    The fences are what keep it honest: same length, same first letter, same
+    last letter. Market Basket is a supermarket in the same state as the receipt
+    behind this code and MARKET is two substitutions from TARGET, so the first
+    letter doing the refusing is not a hypothetical.
+    """
+    from app.extract.receipt_text import _find_merchant, _same_shape
+
+    _raw, merchant = _find_merchant(["Cesrco", "455 Anywhere Rd"])
+    assert merchant == "Costco"
+
+    assert _same_shape("CESRCO", "COSTCO")
+    assert not _same_shape("MARKET", "TARGET"), "wrong first letter"
+    assert not _same_shape("COSTCA", "COSTCO"), "wrong last letter"
+    assert not _same_shape("SUBWAY", "SAFEWAY"), "wrong length"
+    assert not _same_shape("CXXXCO", "COSTCO"), "three wrong is too many"
+
+
+def test_the_two_character_pass_stops_above_the_item_lines():
+    """The weaker the test, the closer to the top its evidence has to come from."""
+    from app.extract.receipt_text import _find_merchant
+    lines = ["QUICK STOP", "1 Main St", "Anytown ME",
+             "CESRCO BRAND TOWELS 4.99", "MILK 3.99"]
+    _raw, merchant = _find_merchant(lines)
+    assert merchant == "Quick Stop"
+
+
+def test_a_supermarket_that_merely_rhymes_is_not_relabelled():
+    """The whole first line, not just the fuzzy helper, must refuse this."""
+    from app.extract.receipt_text import _find_merchant
+    _raw, merchant = _find_merchant(["MARKET BASKET", "1 Main St", "Anytown ME"])
+    assert merchant != "Target"
+
+
+def test_the_tolerant_pass_does_not_reach_the_item_lines():
+    """A store name is printed at the top, so only the top is searched loosely.
+
+    Letting it run down the receipt would give a near-miss a fresh chance on
+    every line, and the lines are where the unusual words are.
+    """
+    from app.extract.receipt_text import _find_merchant
+    lines = ["QUICK STOP", "1 Main St", "Anytown ME", "OPEN 24 HOURS",
+             "CASHIER 04", "REG 2", "COSRCO BRAND TOWELS 4.99"]
+    _raw, merchant = _find_merchant(lines)
+    assert merchant == "Quick Stop"
+
+
+def test_a_recognised_shop_is_distinguishable_from_a_guess():
+    """The merge step needs to tell "Costco" from a fallback street address."""
+    from app.extract.receipt_text import is_known_merchant
+    assert is_known_merchant("Costco")
+    assert not is_known_merchant("455 Scarborough Downs Rd")
+    assert not is_known_merchant(None)
+
+
+def test_one_edit_counts_substitution_insertion_and_deletion():
+    """All three are things OCR does to a stylised logo."""
+    from app.extract.receipt_text import _within_one_edit
+    assert _within_one_edit("COSTCO", "COSTCO")
+    assert _within_one_edit("COSRCO", "COSTCO")     # substituted
+    assert _within_one_edit("COSTCOO", "COSTCO")    # inserted
+    assert _within_one_edit("COSTC", "COSTCO")      # deleted
+    assert not _within_one_edit("CORSCO", "COSTCO")  # two wrong
+    assert not _within_one_edit("MARKET", "TARGET")
+    assert not _within_one_edit("CO", "COSTCO")
+
+
+# --------------------- what the user's confirmed receipts found (1.13.1)
+#
+# Every case below is a line the user's own corrections exposed: they went
+# through all six receipts in the application by hand, and the differences
+# between what they confirmed and what the engine read are recorded in
+# Bookkeeping_record.md section 9.
+
+def test_a_flag_column_printed_left_of_the_item_number():
+    """Costco prints a letter in the margin; Walmart and Aldi print it right.
+
+    Nothing had ever begun a line but a digit, so "E 96716 ORG SPINACH" kept
+    the flag and the item number inside the description -- which is why that
+    photograph returned most of its names verbatim and scored none correct.
+    """
+    receipt = parse_receipt_text("COSTCO\n\nE 96716 ORG SPINACH 4.69\nTOTAL 4.69\n")
+    item = receipt.items[0]
+    assert item.description == "ORG SPINACH"
+    assert item.sku == "96716"
+
+
+def test_the_flag_column_is_not_invented_where_there_is_none():
+    """Aldi's layout has no left-hand letter, and must parse as it always did."""
+    receipt = parse_receipt_text("ALDI\n\n356387 Green Peppers 2.69\nTOTAL 2.69\n")
+    item = receipt.items[0]
+    assert item.description == "Green Peppers"
+    assert item.sku == "356387"
+
+
+def test_a_word_is_not_mistaken_for_the_flag_column():
+    """Only a lone letter is a flag; a real first word stays in the name."""
+    receipt = parse_receipt_text("SHOP\n\nORG 12345 SPINACH 4.69\nTOTAL 4.69\n")
+    assert receipt.items[0].description.startswith("ORG")
+
+
+def test_subtotal_survives_losing_a_letter():
+    """OCR returns Costco's "SUBTOTAL" as "SUBT TAL", splitting it at the O."""
+    receipt = parse_receipt_text(
+        "COSTCO\n\nE 96716 ORG SPINACH 4.69\nSUBT TAL 188.37\nTAX 5.15\n"
+        "**** TOTAL 193.52\n")
+    assert receipt.subtotal == "188.37"
+    assert [i.description for i in receipt.items] == ["ORG SPINACH"], (
+        "the subtotal line was also being counted as the largest purchase")
+
+
+def test_a_total_printed_after_its_amount_is_read():
+    """Walmart's card slip states it as "24.81 TOTAL PURCHASE".
+
+    On Walmart2 that is the only legible statement of the total: the TOTAL line
+    itself came back as "TOT AL 24 . a-I".
+    """
+    receipt = parse_receipt_text(
+        "WALMART\n\nMILK 3.24\nSUBTOTAL 23.52\nTOT AL 24 . a-I\n"
+        "24.81 TOTAL PURCHASE\n")
+    assert receipt.total == "24.81"
+
+
+def test_a_leading_amount_is_only_read_on_a_line_that_names_a_field():
+    """Otherwise an item priced before its own name becomes the total."""
+    receipt = parse_receipt_text("SHOP\n\n9.99 SOMETHING ODD\nTOTAL 12.00\n")
+    assert receipt.total == "12.00"
+
+
+def test_a_stated_tax_that_contradicts_the_breakdown_loses_to_the_arithmetic():
+    """The Costco summary reads "TAX 5.16" where the paper says 5.15.
+
+    Both readings sit on the same receipt and nothing in the text says which
+    holds the misread digit, so the receipt decides: subtotal plus the summed
+    components equals the printed total, and subtotal plus the stated figure is
+    a cent over.
+    """
+    receipt = parse_receipt_text(
+        "COSTCO\n\nSUBT TAL 188.37\nTAX 5.16\nA 5.500% TAX 2.86\n"
+        "F 8.00% TAX 2.29\n**** TOTAL 193.52\n")
+    assert receipt.tax == "5.15"
+    assert receipt.subtotal == "188.37"
+    assert receipt.total == "193.52"
+
+
+def test_a_stated_tax_that_reconciles_is_left_alone():
+    """The breakdown only wins when the stated figure fails the arithmetic."""
+    receipt = parse_receipt_text(
+        "SHOP\n\nSUBTOTAL 100.00\nTAX 5.15\nA 5.500% TAX 2.86\n"
+        "F 8.00% TAX 2.29\nTOTAL 105.15\n")
+    assert receipt.tax == "5.15"
+
+
+def test_a_stated_tax_stands_when_the_arithmetic_cannot_decide():
+    """No subtotal read means no evidence, and no evidence means no override."""
+    receipt = parse_receipt_text(
+        "SHOP\n\nTAX 5.16\nA 5.500% TAX 2.86\nF 8.00% TAX 2.29\nTOTAL 193.52\n")
+    assert receipt.tax == "5.16"
+
+
+def test_an_aldi_receipt_that_states_its_tax_is_untouched():
+    """Aldi prints "B-Taxable 0.15" with no percentage, so there is no
+    breakdown to weigh it against and nothing to settle."""
+    receipt = parse_receipt_text(
+        "ALDI\n\nSUBTOTAL 65.17\nB-Taxable 0.15\nA-Taxable 0.00\n"
+        "AMOUNT DUE 65.32\n")
+    assert receipt.tax == "0.15"
+    assert receipt.total == "65.32"
+
+
+# ------------------- the receipt's own item count (1.14.0)
+#
+# Every chain here prints one, in its own way. The subtotal says how much money
+# is unaccounted for; this says how many lines to go looking for, which is what
+# tells a reviewer when they have finished.
+
+@pytest.mark.parametrize("line, expected", [
+    ("ITEMS SOLD 21", 21),          # Walmart
+    ("# ITEMS SOLD 3", 3),          # Walmart, with the hash
+    ("18 ITEMS", 18),               # Aldi, count first
+    ("7 ITEMS", 7),
+    # Costco prints "TOTAL NUMBER OF ITEMS SOLD = 16" and OCR destroys both
+    # keywords, leaving "NUMBER OF" intact.
+    ("TOTAL NUMBER OF 1 EMS sot-c 16", 16),
+])
+def test_the_printed_item_count_is_read_in_each_chains_dialect(line, expected):
+    from app.extract.receipt_text import _find_items_sold
+    assert _find_items_sold([line]) == expected
+
+
+def test_a_bare_sold_line_is_not_trusted_for_a_count():
+    """The second Costco pass returns "sold 6" for a line that reads 16.
+
+    A pattern loose enough to catch that would import a wrong count, and a wrong
+    count is worse than none: the flag it raises sends the reviewer hunting for
+    lines that are not missing.
+    """
+    from app.extract.receipt_text import _find_items_sold
+    assert _find_items_sold(["sold 6"]) is None
+
+
+def test_no_printed_count_is_not_an_error():
+    from app.extract.receipt_text import _find_items_sold
+    assert _find_items_sold(["MILK 3.24", "TOTAL 3.24"]) is None
+    assert _find_items_sold(["ITEMS SOLD 0"]) is None, "a till that sold nothing"
+
+
+def test_deposits_and_discounts_are_not_items_sold():
+    """Walmart prints 21 sold against 24 lines; the difference is three Maine
+    bottle deposits. Verified against all six confirmed receipts, where the
+    printed count then agrees exactly."""
+    from app.validate import _lines_missing
+    items = [{"description": "MILK", "is_discount": 0},
+             {"description": "ME DEPOSIT", "is_discount": 0},
+             {"description": "MANAGER COUPON", "is_discount": 1}]
+    assert _lines_missing(items, 1) is None, "one purchase, one sold"
+    assert _lines_missing(items, 3) == 2
+
+
+def test_reading_more_lines_than_were_sold_is_not_flagged():
+    """Real evidence of an invented line, but also what a misread count looks
+    like -- and a flag sending a reviewer after a line that does not exist is
+    worse than no flag."""
+    from app.validate import _lines_missing
+    items = [{"description": f"ITEM {i}", "is_discount": 0} for i in range(5)]
+    assert _lines_missing(items, 3) is None
+
+
+def test_the_missing_line_flag_names_the_shortfall():
+    flags = check(
+        purchased_at="2026-09-06", total_cents=19352, subtotal_cents=18837,
+        tax_cents=515, tip_cents=None,
+        items=[{"description": f"ITEM {i}", "amount_cents": 100} for i in range(12)],
+        confidence=0.9, items_sold=16,
+    )
+    assert any("at least 4 line(s) are missing" in flag for flag in flags)
+
+
+def test_a_receipt_with_every_line_read_raises_no_count_flag():
+    flags = check(
+        purchased_at="2026-08-29", total_cents=1743, subtotal_cents=1743,
+        tax_cents=0, tip_cents=None,
+        items=[{"description": f"ITEM {i}", "amount_cents": 249} for i in range(7)],
+        confidence=0.9, items_sold=7,
+    )
+    assert not any("items were sold" in flag for flag in flags)
+
+
+# ---------------- capital O read as zero (1.17.0)
+#
+# The largest single defect left after RapidOCR landed: five of the fourteen
+# wrong item names across the six confirmed receipts are this one confusion, and
+# it is not a model problem -- O and 0 are the same ink in a till printer's
+# font, so a bigger recogniser meets exactly the same ambiguity. Every reading
+# below came off a real photograph.
+
+@pytest.mark.parametrize("line, expected", [
+    # A zero inside an otherwise all-capital word.
+    ("PR0TEINSUPPL 23.18 X", "PROTEINSUPPL"),
+    ("GVC0RNSTARCH 1.92 O", "GVCORNSTARCH"),
+    # The unit, where the digit in front of it stops the whole-word rule.
+    ("DOVE BW 110Z 5.47 X", "DOVE BW 11OZ"),
+    ("AIM TP 5.50Z 0.98 X", "AIM TP 5.5OZ"),
+    ("EQJELLUBE80Z 4.94 X", "EQJELLUBE8OZ"),
+    # Both rules on one line, which is the common shape.
+    ("GV C0RN 160Z 1.28 O", "GV CORN 16OZ"),
+])
+def test_a_zero_the_printer_meant_as_a_letter_is_put_back(line, expected):
+    receipt = parse_receipt_text(f"WALMART\n{line}\nSUBTOTAL 99.99\n")
+    assert receipt.items[0].description == expected
+
+
+@pytest.mark.parametrize("text", [
+    "756809105667",         # a barcode standing in for a name, as Walmart2 prints it
+    "002200003672",
+    "WD40 LUBRICANT",       # a real digit inside a capitalised code
+    "CO2 CARTRIDGE",
+    "VITAMIN D3",
+    "COKE 2L",
+    "9218 RED ONIONS",      # a Costco item number
+    "Green Onions",         # mixed case: Aldi's layout is left alone
+    "100",
+    "0",
+])
+def test_a_digit_that_is_really_a_digit_is_not_turned_into_a_letter(text):
+    """The rules are narrow on purpose, and this is the half that matters.
+
+    A missed repair leaves a name slightly wrong and a reviewer can see it. A
+    wrong repair invents a plausible name nobody will question -- and on a
+    barcode it names a different product entirely -- so anything the rules
+    cannot be sure of they decline, including every token carrying a digit
+    other than zero.
+
+    Tested on the function rather than through the parser because most of these
+    never reach it as a description: the parser lifts a 9-to-14 digit run out as
+    the barcode and a leading count out as the quantity long before this runs.
+    """
+    from app.extract.receipt_text import _repair_letter_o
+
+    assert _repair_letter_o(text) == text
+
+
+def test_an_item_number_survives_the_line_it_shares_with_a_repair():
+    """Costco prints the item number in the description's own column, so the
+    repair and the number are the same string until the parser splits them."""
+    receipt = parse_receipt_text(
+        f"COSTCO\n9218 GVC0RNSTARCH 4.89 O\nSUBTOTAL 4.89\n")
+    assert receipt.items[0].sku == "9218"
+    assert receipt.items[0].description == "GVCORNSTARCH"
+
+
+def test_the_repair_cannot_reach_an_amount():
+    """It runs on the description once the amount is off the line. Pinned
+    because the two are cut from the same string a few lines apart."""
+    receipt = parse_receipt_text("WALMART\nGVC0RNSTARCH 10.05 X\nSUBTOTAL 10.05\n")
+    assert receipt.items[0].amount == "10.05"
+    assert receipt.subtotal == "10.05"
+
+
+# ---------------- who paid, and with what (1.17.0)
+#
+# A KFC receipt prints "Cashier: Zackariah" near the top. `_find_payment` used
+# plain substring matching, so CASHIER matched CASH and it returned before ever
+# reaching "Card Type: Mastercard" at the bottom. Aldi's "Your cashier today was
+# Ismail" did the same, so three of the eight photographs recorded a card
+# purchase as cash. Third appearance of the trap `_whole_words` exists for.
+
+@pytest.mark.parametrize("line", [
+    "Cashier: Zackariah",                 # KFC
+    "Cashier:Zackariah",                  # ...as OCR actually returns it
+    "Your cashier today was Ismail",      # Aldi
+    "CASHEWS 4.99 F",                     # the original 11.9.4 defect
+    "CASHBACK AVAILABLE",
+])
+def test_a_word_that_merely_contains_cash_is_not_a_payment(line):
+    from app.extract.receipt_text import _find_payment
+
+    assert _find_payment([line]) is None
+
+
+def test_the_tender_line_below_a_cashier_name_is_the_one_that_counts():
+    """The whole KFC receipt in miniature: the decoy is printed first."""
+    from app.extract.receipt_text import _find_payment
+
+    assert _find_payment(["Cashier:Zackariah",
+                          "ETender Credit $12.84",
+                          "Card Tyne: Mastercard"]) == "CREDIT"
+
+
+def test_a_receipt_really_paid_in_cash_still_says_so():
+    from app.extract.receipt_text import _find_payment
+
+    assert _find_payment(["CASH TEND 200.00", "CHANGE DUE 58.06"]) == "CASH"
+
+
+# --- the four digits, which must be the card's and not something else --------
+
+def test_the_approval_code_is_not_mistaken_for_the_card():
+    """It used to take the last four digits *anywhere* on the line, so the
+    approval code at the end was reported as the card. A card number nobody can
+    check is the kind of wrong that survives: right shape, no arithmetic to
+    contradict it. Only digits sitting against the brand are trusted.
+
+    The card and the approval code are **invented, and must stay invented**
+    (section 11.57) -- but they must also stay *different from each other*, or
+    this passes for the wrong reason."""
+    from app.extract.receipt_text import _find_payment
+
+    assert _find_payment(["MASTERCARD- 0000 I 1 APPR#009999"]) == "MASTERCARD ****0000"
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("MASTERCARD- 0000 I 1", "MASTERCARD ****0000"),
+    ("US DEBIT- 0000 I 0", "DEBIT ****0000"),
+    ("VISA ****1234", "VISA ****1234"),
+    ("MASTERCARD **************0000 PIN", "MASTERCARD ****0000"),
+    # An amount printed against the brand is not a card number.
+    ("CREDIT 1234.56", "CREDIT"),
+    ("MASTERCARD PURCHASE 1234", "MASTERCARD"),
+    # Nothing card-shaped after the brand: a brand and no number beats a guess.
+    ("Mastercard 65.32", "MASTERCARD"),
+    ("Credit Card $ 65.32", "CREDIT"),
+    ("Visa Resp: APPROVED", "VISA"),
+    ("DEBIT TEND 6.39", "DEBIT"),
+])
+def test_only_digits_against_the_brand_are_read_as_the_card(line, expected):
+    from app.extract.receipt_text import _find_payment
+
+    assert _find_payment([line]) == expected
+
+
+# ---------------- fast food: the total is named after the counter (1.17.0)
+#
+# The first restaurant receipt tested here, and it has no line saying TOTAL at
+# all. The amount charged sits against CARRY OUT, and the tax is printed
+# *above* it rather than below. Only CARRY OUT is confirmed against a real
+# photograph; the siblings are the same label in the same slot.
+
+@pytest.mark.parametrize("label", [
+    "CARRY OUT", "Carry Out", "CARRY-OUT", "CARRYOUT",
+    "TAKE OUT", "DINE IN", "DRIVE THRU", "DRIVE-THROUGH",
+])
+def test_the_counter_label_carries_the_total(label):
+    receipt = parse_receipt_text(
+        f"KFC/TB\nBig Box 11.89\nTax 0.95\n{label} $12.84\n")
+    assert receipt.total == "12.84"
+    assert receipt.tax == "0.95"
+
+
+def test_a_bag_charged_at_the_counter_is_not_the_total():
+    """The whole safety of the rule. The label has to be followed by the money
+    with nothing in between -- otherwise a fifty-cent bag overwrites the total
+    of the receipt, which is the worst single field to get wrong."""
+    receipt = parse_receipt_text(
+        "KFC/TB\nBig Box 11.89\nCARRY OUT BAG 0.10\nTOTAL 12.84\n")
+    assert receipt.total == "12.84"
+    assert ("CARRY OUT BAG", "0.10") in [(i.description, i.amount) for i in receipt.items]
+
+
+def test_to_go_is_deliberately_not_a_total_label():
+    """Two of the commonest short words in English, and it survives the
+    space-stripped comparison as TOGO. No photograph here justifies the risk."""
+    receipt = parse_receipt_text("KFC/TB\nBig Box 11.89\nTO GO 12.84\n")
+    assert receipt.total != "12.84"
+
+
+def test_the_whole_fast_food_shape_reconciles():
+    """Tax above the total, no subtotal line anywhere, and four unpriced
+    components listed under the one item that carries a price. Every value here
+    is off KFC1.jpg except the card block, which is invented and must stay so.
+    """
+    receipt = parse_receipt_text(
+        "KFC/TB\nRestaurant #G000000\nTicket #0000\n2026-08-28\n"
+        "Big Box 11.89\nInd Mash/ Gvy\nInd Pot Wedge\nBiscuit\n"
+        "Md Bj MtnDew\nTax 0.95\nCARRY OUT $12.84\n"
+        "ETender Credit $12.84\nChange $0.00\n")
+    assert receipt.total == "12.84"
+    assert receipt.tax == "0.95"
+    assert receipt.purchased_at == "2026-08-28"
+    # The four components carry no price, and none is invented for them.
+    assert [(i.description, i.amount) for i in receipt.items] == [("Big Box", "11.89")]
+    assert to_cents(receipt.total) - to_cents(receipt.tax) == to_cents("11.89")
+
+
+# ---------------- a zero in the tax-flag column (1.17.0)
+#
+# Walmart flags a non-taxable line with the letter O, and RapidOCR runs it into
+# the amount as a digit: "0.05 O" arrives as "0.050", which is not a
+# two-decimal amount, so the line was thrown away and its money with it. Three
+# receipts lost a bottle deposit this way.
+#
+# The older engine never hit it, and why is the useful part: Windows OCR returns
+# one box per WORD, so the space is rebuilt from geometry and it produced
+# "0.05 O" on all eleven deposit lines. RapidOCR returns one box per LINE, so
+# the space survives only if the recogniser emits it.
+
+def test_a_zero_in_the_flag_column_is_the_letter_o():
+    from app.extract.receipt_text import _TRAILING_AMOUNT
+
+    m = _TRAILING_AMOUNT.search("ME DEPOSIT 000787423909 F 0.050")
+    assert m is not None, "the line is discarded entirely without this"
+    assert m.group("amount") == "0.05"
+    assert m.group("flag") == "0"
+
+
+def test_the_deposit_survives_and_keeps_its_taxability():
+    """`O` means non-taxable at Walmart. Left as a bare 0 the lookup returns
+    None -- "the receipt did not say" -- which loses the only statement it made.
+    """
+    receipt = parse_receipt_text(
+        "Walmart\nCOKE 04900050110 F 3.04 X\n"
+        "ME DEPOSIT 000787423909 F 0.050\nSUBTOTAL 3.09\n")
+    deposits = [i for i in receipt.items if "DEPOSIT" in i.description.upper()]
+    assert [(i.amount, i.taxable) for i in deposits] == [("0.05", False)]
+
+
+def test_the_spaced_form_the_other_engine_produces_still_works():
+    from app.extract.receipt_text import _TRAILING_AMOUNT
+
+    m = _TRAILING_AMOUNT.search("ME DEPOSIT 000787423909 F 0.05 O")
+    assert (m.group("amount"), m.group("flag")) == ("0.05", "O")
+
+
+@pytest.mark.parametrize("line", [
+    "SOMETHING 123.456",     # only 0 is allowed, so this is still not an amount
+    "SOMETHING 1.234",
+])
+def test_only_a_zero_is_read_as_a_flag_never_another_digit(line):
+    from app.extract.receipt_text import _TRAILING_AMOUNT
+
+    assert _TRAILING_AMOUNT.search(line) is None
+
+
+def test_a_weight_is_still_not_an_amount_with_a_flag():
+    """The rule that had to survive: two-letter flags still need their space,
+    or "(T) 0.02lb" reads as 0.02 carrying the tax flag "lb"."""
+    from app.extract.receipt_text import _TRAILING_AMOUNT
+
+    assert _TRAILING_AMOUNT.search("(T) 0.02lb") is None
+

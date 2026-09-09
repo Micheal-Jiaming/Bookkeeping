@@ -66,6 +66,11 @@ _last_call: dict[str, float] = {}
 # mistranslated. It is not a place to pre-empt problems nobody has had.
 GLOSSARY: dict[str, str] = {
     "ME DEPOSIT": "缅因州瓶罐押金",
+    # Costco prints this on its own, with no "chicken" anywhere on the line, and
+    # a drumstick out of context is the thing you hit a drum with: Google returns
+    # 鼓槌. The shorthand expander cannot help here, because the English is not
+    # abbreviated -- it is complete, and complete English is what is ambiguous.
+    "DRUMSTICKS": "鸡腿",
     "BEDINABAG": "床上用品套装",
     "ROUNDING": "现金找零舍入",
     "MANAGER COUPON": "经理优惠券",
@@ -223,6 +228,37 @@ def chinese_for(texts: list[str], *, enabled: bool = True) -> dict[str, str]:
                 out[text] = zh
         _remember(fresh)
     return out
+
+
+def cached_state(texts: list[str]) -> dict[str, str | None]:
+    """What the cache holds for each name, misses included. Never goes online.
+
+    ``chinese_for`` returns only the names it has Chinese for, which cannot tell
+    the review pane apart from "asked, and neither service had one" -- and those
+    look identical on screen, as a line with nothing under it. That is the exact
+    complaint this exists to answer: a name absent from the result here was
+    never asked, and a name present with ``None`` was asked and came back empty,
+    which is worth saying out loud.
+    """
+    wanted = {text.strip() for text in texts if text and text.strip()}
+    if not wanted:
+        return {}
+    state: dict[str, str | None] = {}
+    for text in list(wanted):
+        known = GLOSSARY.get(text.upper())
+        if known:
+            state[text] = known
+            wanted.discard(text)
+    if not wanted:
+        return state
+    with connect() as db:
+        holes = ",".join("?" * len(wanted))
+        rows = db.execute(
+            f"SELECT source, zh FROM translation WHERE source IN ({holes})",
+            tuple(wanted)).fetchall()
+    for row in rows:
+        state[row["source"]] = row["zh"]
+    return state
 
 
 def _remember(pairs: list[tuple[str, str | None]]) -> None:

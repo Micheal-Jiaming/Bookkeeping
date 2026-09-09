@@ -93,3 +93,9 @@ pictures/
 !docs/screenshots/reports.png
 !docs/screenshots/rules.png
 !docs/screenshots/settings.png
+
+# Ground truth exported from the books by tools/export_truth.py. Ignored for the
+# same reason pictures/ is: it is an itemised list of what one person bought, on
+# what day, for how much. It is also useless without the photographs, which are
+# ignored too, so a clone loses nothing by not having it.
+tests/fixtures/receipts_truth.local.json

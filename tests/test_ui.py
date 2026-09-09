@@ -664,3 +664,140 @@ def test_the_engine_output_window_masks_the_receipts_own_numbers(window, books,
     page.review.toggle_raw()
     pump(window)
     assert "999900001111" in "".join(shown), "turning it off must show the truth"
+
+
+# ---------------------- restoring the window's size and place (1.14.1)
+#
+# `fit_to_screen` is pure and takes the screen size as numbers, so none of this
+# needs a window -- which is the point of having split it out of the widget.
+
+@pytest.mark.parametrize("saved, expected, why", [
+    ("1240x800+100+100", "1240x800+100+100",
+     "a geometry that already fits is kept exactly"),
+    ("1240x800+2900+300", "1240x800+1320+300",
+     "a window left on a second monitor that is gone comes back to this one"),
+    ("1240x800+-300+-200", "1240x800+0+0",
+     "a corner off the top or left is pulled back on"),
+])
+def test_a_remembered_geometry_is_brought_onto_the_screen(saved, expected, why):
+    from app.ui.window import fit_to_screen
+    assert fit_to_screen(saved, 2560, 1440) == expected, why
+
+
+def test_a_window_taller_than_the_screen_is_cut_down_to_fit():
+    """The real case: 1733 pixels tall on a 1440-tall desktop, starting 1034
+    down it. The old check passed this, because it looked only at whether the
+    top-left corner was visible -- so the window opened with its save buttons
+    below the bottom edge."""
+    from app.ui.window import fit_to_screen
+    fitted = fit_to_screen("2461x1733+421+1034", 2560, 1440)
+    width, rest = fitted.split("x")
+    height, x, y = rest.split("+")
+    assert int(x) + int(width) <= 2560
+    assert int(y) + int(height) <= 1440
+
+
+def test_a_geometry_from_a_bigger_machine_fits_a_smaller_one():
+    """The books travel with the program, and window_geometry travels in them,
+    so a size saved on a 4K desktop routinely arrives on a laptop."""
+    from app.ui.window import fit_to_screen
+    fitted = fit_to_screen("2400x1500+40+40", 1366, 768)
+    width, rest = fitted.split("x")
+    height, x, y = rest.split("+")
+    assert int(x) + int(width) <= 1366
+    assert int(y) + int(height) <= 768
+
+
+def test_the_usable_area_excludes_the_taskbar(window):
+    """`winfo_screenheight` counts the taskbar's pixels as available, so
+    clamping against it puts a window's last rows -- the buttons that save a
+    receipt -- behind it. Windows is asked for the real work area instead.
+
+    Measured on the machine this was written on: Tk reports 3840x2160 and the
+    work area comes back 3840x2088, a 72-pixel taskbar. Asserting only that it
+    is no larger than the screen and not a sliver of it, because the taskbar's
+    size and edge are the user's business.
+    """
+    from app.ui.window import usable_screen
+    root = window.root
+    width, height = usable_screen(root)
+    assert 0 < width <= root.winfo_screenwidth()
+    assert root.winfo_screenheight() * 0.5 < height <= root.winfo_screenheight()
+
+
+def test_a_window_is_never_placed_over_the_taskbar():
+    """The whole point of passing the usable area rather than the screen: the
+    bottom edge lands on the work area, not on the display."""
+    from app.ui.window import fit_to_screen
+    fitted = fit_to_screen("2461x1733+421+1034", 3840, 2088)
+    height, x, y = fitted.split("x")[1].split("+")
+    assert int(y) + int(height) <= 2088
+
+
+@pytest.mark.parametrize("saved", ["", "not-a-geometry", "1240x800", "100x80+10+10"])
+def test_an_unusable_geometry_falls_back_rather_than_crashing(saved):
+    """None means "use the default size", which is what the caller then does."""
+    from app.ui.window import fit_to_screen
+    assert fit_to_screen(saved, 2560, 1440) is None
+
+
+# ------------- telling the reviewer what could not be found (1.16.0)
+
+def _subtitles(window, receipt_id: int) -> list[str]:
+    """The grey line under each item, in order, blanks included."""
+    window.pages["receipts"].refresh(select=receipt_id)
+    window.root.update()
+    out = []
+    for record in window.pages["receipts"].review._item_rows:
+        labels = [child for child in record["frame"].winfo_children()
+                  if isinstance(child, tk.Label)]
+        out.append(labels[-1].cget("text") if labels else "")
+    return out
+
+
+def test_a_name_nobody_could_find_says_so_instead_of_sitting_blank(window, books):
+    """The reported defect: a line with nothing under it reads as the
+    application not having bothered, when in fact it asked and got nothing."""
+    from app.pipeline import NOT_FOUND
+    store = books["store"]
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-08-18", total_cents=494,
+        items=[ItemEdit(description="EQJELLUBE80Z", amount_cents=494,
+                        name_source=NOT_FOUND, raw_description=None)]))
+    with books["db"].connect() as conn:
+        conn.execute("UPDATE line_item SET name_source = ? WHERE receipt_id = ?",
+                     (NOT_FOUND, receipt_id))
+
+    assert "no product name found" in _subtitles(window, receipt_id)[0]
+
+
+def test_a_line_nothing_was_ever_asked_about_stays_quiet(window, books):
+    """No note where no question was put: FRENCH BREAD needs no expansion, and
+    a note on every plain-English line would be noise."""
+    store = books["store"]
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-08-18", total_cents=147,
+        items=[ItemEdit(description="FRENCH BREAD", amount_cents=147)]))
+
+    assert _subtitles(window, receipt_id)[0] == ""
+
+
+def test_a_translation_nobody_had_says_so_in_chinese(window, books):
+    """The other half: in Chinese the missing thing is the translation."""
+    from app import i18n
+    from app.lookup import translate
+    store = books["store"]
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-08-18", total_cents=494,
+        items=[ItemEdit(description="EQJELLUBE80Z", amount_cents=494)]))
+    # Asked, and neither service had one -- which is what a NULL zh records.
+    translate._remember([("EQJELLUBE80Z", None)])
+
+    i18n.set_language("zh")
+    try:
+        assert _subtitles(window, receipt_id)[0] == "未找到译文"
+    finally:
+        i18n.set_language("en")

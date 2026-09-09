@@ -175,6 +175,46 @@ def test_the_migration_leaves_a_rule_the_user_already_wrote_alone(books):
     assert mops[0]["is_builtin"] == 0
 
 
+def test_an_existing_database_gains_the_costco_rules_and_the_name_source(books):
+    """Version 7 adds a column, which no other migration here has had to do.
+
+    ``CREATE TABLE IF NOT EXISTS`` leaves an existing table exactly as it is, so
+    the column in SCHEMA only ever reaches a database created after this
+    version. Without the ALTER, an older set of books would keep a line_item
+    table with no name_source and fail on the very next scan.
+    """
+    db, store = books["db"], books["store"]
+    with db.connect() as connection:
+        connection.execute("DROP TABLE line_item")
+        connection.execute(
+            "CREATE TABLE line_item ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " receipt_id INTEGER NOT NULL,"
+            " line_no INTEGER NOT NULL DEFAULT 0,"
+            " description TEXT NOT NULL DEFAULT '',"
+            " raw_description TEXT, sku TEXT, quantity REAL,"
+            " unit_price_cents INTEGER, amount_cents INTEGER, category_id INTEGER,"
+            " category_source TEXT, is_discount INTEGER NOT NULL DEFAULT 0,"
+            " taxable INTEGER)")
+        connection.execute(
+            "DELETE FROM category_rule WHERE pattern IN ('DRUMSTICK', 'CROISS')")
+        connection.execute("PRAGMA user_version = 6")
+
+    db.init_db()
+
+    with db.connect() as connection:
+        columns = {row["name"]
+                   for row in connection.execute("PRAGMA table_info(line_item)")}
+    assert "name_source" in columns
+    assert {"DRUMSTICK", "CROISS", "CAGE FREE"} <= {r["pattern"] for r in store.list_rules()}
+
+
+def test_the_column_migration_is_safe_to_run_twice(books):
+    """ALTER TABLE ADD COLUMN raises rather than shrugging on a repeat."""
+    books["db"].init_db()
+    books["db"].init_db()
+
+
 def test_an_empty_set_of_books_reports_nothing(books):
     store = books["store"]
     assert store.status_counts() == {}
@@ -644,3 +684,88 @@ def test_engine_availability_explains_itself(books):
     engines = {e["name"]: e for e in engine_status(books["settings"].get_all())}
     assert engines["claude"]["available"] is False
     assert "API key" in engines["claude"]["detail"]
+
+
+# ------------------------------------------- a hand-typed date (1.13.1)
+
+def test_a_date_typed_without_a_leading_zero_is_padded(books):
+    """Dates are stored and sorted as text, so "2026-8-18" sorts as month 8+.
+
+    Found in the user's own books: the Walmart receipt whose header is out of
+    frame had its date entered by hand, and the row then sat above 2026-09-06
+    at the top of the Receipts list as though it were the newest of the six.
+    """
+    store = books["store"]
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(purchased_at="2026-8-18",
+                                               total_cents=100))
+    assert store.get_receipt(receipt_id)["purchased_at"] == "2026-08-18"
+
+
+def test_a_date_already_padded_is_unchanged(books):
+    store = books["store"]
+    receipt_id = store.create_manual()
+    store.save_receipt(receipt_id, ReceiptEdit(purchased_at="2026-09-06",
+                                               total_cents=100))
+    assert store.get_receipt(receipt_id)["purchased_at"] == "2026-09-06"
+
+
+def test_anything_that_is_not_a_date_is_stored_as_the_reviewer_typed_it(books):
+    """The field is theirs. A value this cannot parse is shown back to them
+    unchanged rather than silently reinterpreted."""
+    from app.store import normalise_date
+    assert normalise_date("last Tuesday") == "last Tuesday"
+    assert normalise_date("2026-13-40") == "2026-13-40"
+    assert normalise_date("") is None
+    assert normalise_date(None) is None
+    assert normalise_date("  2026-7-4  ") == "2026-07-04"
+
+
+# --------------------------- the receipt's own item count (1.14.0)
+
+def test_the_missing_line_flag_survives_a_save(books):
+    """The count is the receipt's statement, not a field the reviewer edits.
+
+    Carried on the row rather than on ReceiptEdit, so that saving a draft does
+    not silently clear the flag whether or not the lines were added.
+    """
+    db, store = books["db"], books["store"]
+    receipt_id = store.create_manual()
+    with db.connect() as connection:
+        connection.execute("UPDATE receipt SET items_sold = 16 WHERE id = ?",
+                           (receipt_id,))
+
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-09-06", total_cents=19352,
+        items=[ItemEdit(description=f"ITEM {i}", amount_cents=100) for i in range(12)]))
+
+    flags = store.get_receipt(receipt_id)["review_flags"]
+    assert any("at least 4 line(s) are missing" in flag for flag in flags)
+
+
+def test_the_flag_clears_once_the_missing_lines_are_added(books):
+    db, store = books["db"], books["store"]
+    receipt_id = store.create_manual()
+    with db.connect() as connection:
+        connection.execute("UPDATE receipt SET items_sold = 3 WHERE id = ?",
+                           (receipt_id,))
+
+    store.save_receipt(receipt_id, ReceiptEdit(
+        purchased_at="2026-09-06", total_cents=300,
+        items=[ItemEdit(description=f"ITEM {i}", amount_cents=100) for i in range(3)]))
+
+    flags = store.get_receipt(receipt_id)["review_flags"]
+    assert not any("items were sold" in flag for flag in flags)
+
+
+def test_an_existing_database_gains_the_item_count_column(books):
+    """Version 8, and the third migration to need an explicit ALTER."""
+    db, store = books["db"], books["store"]
+    with db.connect() as connection:
+        connection.execute("PRAGMA user_version = 7")
+    db.init_db()
+    db.init_db()   # twice: ADD COLUMN raises rather than shrugging on a repeat
+    with db.connect() as connection:
+        columns = {row["name"]
+                   for row in connection.execute("PRAGMA table_info(receipt)")}
+    assert "items_sold" in columns

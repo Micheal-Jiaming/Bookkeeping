@@ -43,22 +43,41 @@ STATUS_TONE = {
 # the image can always be opened full size with a click.
 IMAGE_MAX = (260, 320)
 
+# How many half-second waits the pane gives an enrichment pass before it
+# stops watching. The translator's own budget is 40 seconds, so this is
+# comfortably past it -- the cap exists so a wedged pass cannot leave a
+# timer firing for the life of the window.
+ENRICH_MAX_WAITS = 120
 
-def _chinese_names(items: list[dict]) -> dict[str, str]:
-    """Chinese for this receipt's item names, from the cache only.
+# What to call an expansion, by where it came from. Books written before the
+# source was recorded have none, and fall back to the neutral "expanded:" rather
+# than to a claim about a barcode that may not be true of that line.
+_NAME_SOURCE_LABELS = {
+    "barcode": "from barcode: ",
+    "shorthand": "expanded: ",
+    "model": "read as: ",
+}
+
+
+def _chinese_names(items: list[dict]) -> dict[str, str | None]:
+    """What the translation cache holds for this receipt, misses included.
 
     Never goes to the network: the pane is drawn on the interface thread and a
-    translation request there would freeze the window. The scan fills the cache
-    (``pipeline._translate_item_names``), so by review time the answers are
-    already here. A receipt scanned before the language was switched simply has
-    none, and shows its English name.
+    translation request there would freeze the window. A scan fills the cache,
+    and so does ``pipeline.enrich_now`` after the reviewer saves, so by the time
+    anybody is reading this the answers are already here.
+
+    A name missing from the result was never asked about; a name present with
+    ``None`` was asked and neither service had an answer. The pane needs to tell
+    those apart, because on screen they were the same thing -- a line with
+    nothing underneath it -- and that is what the user reported.
     """
     if i18n.current() != "zh":
         return {}
     names = [(i.get("raw_description") or i.get("description") or "").strip()
              for i in items]
     try:
-        return lookup.chinese_for([n for n in names if n], enabled=False)
+        return lookup.cached_state([n for n in names if n])
     except Exception:
         log.exception("Could not read cached translations")
         return {}
@@ -522,29 +541,43 @@ class ReviewPane:
         # The printed name stays in the editable field because it is what the
         # receipt actually says. The expansion goes underneath it, where it
         # answers "what *is* EQJELLUBE8OZ?" without overwriting the evidence.
-        # "from barcode" is not decoration. The name came from a catalogue,
-        # keyed on a number the OCR read off a photograph, and one misread digit
+        # Naming the source is not decoration, because the three differ in how
+        # much they can be trusted. A barcode name came from a catalogue, keyed
+        # on a number the OCR read off a photograph, and one misread digit
         # produces a confidently wrong product -- a toothpaste on the test
-        # receipt came back as an Audi cylinder head gasket. Saying where the
-        # name came from lets a reviewer weigh it instead of trusting it.
+        # receipt came back as an Audi cylinder head gasket. A shorthand
+        # expansion cannot be wrong about *which* product it is: it only rewrites
+        # abbreviations the receipt printed itself. Saying which one a reviewer
+        # is looking at lets them weigh it instead of trusting it.
         readable = (item.get("raw_description") or "").strip()
-        chinese = self._zh.get(readable or item.get("description", "").strip())
+        key = readable or (item.get("description") or "").strip()
+        chinese = self._zh.get(key)
+        subtitle = None
         if chinese:
             # In Chinese the translation is the useful line, so it replaces the
             # English rather than adding a third. The printed name is still in
             # the editable field above, which is the receipt's own word for it.
-            tk.Label(row, text=chinese, bg=theme["CARD"], fg=theme["DIM"],
-                     font=theme.font(8), anchor="w").pack(fill="x", padx=(6, 0))
+            subtitle = chinese
         elif readable:
-            tk.Label(row, text=t("from barcode: ") + readable, bg=theme["CARD"],
-                     fg=theme["DIM"], font=theme.font(8),
-                     anchor="w").pack(fill="x", padx=(6, 0))
+            subtitle = t(_NAME_SOURCE_LABELS.get(item.get("name_source"),
+                                                 "expanded: ")) + readable
+        elif key in self._zh:
+            # In the cache with no Chinese against it: both services were asked
+            # and neither had one. Saying so is the whole point -- a blank line
+            # reads as the application not having bothered.
+            subtitle = t("no translation found")
+        elif item.get("name_source") == pipeline.NOT_FOUND:
+            subtitle = t("no product name found")
+        if subtitle:
+            tk.Label(row, text=subtitle, bg=theme["CARD"], fg=theme["DIM"],
+                     font=theme.font(8), anchor="w").pack(fill="x", padx=(6, 0))
 
         record = {
             "frame": row, "description": description, "quantity": quantity,
             "amount": amount, "combo": combo, "source": source,
             "unit_price_cents": item.get("unit_price_cents"),
             "sku": item.get("sku"), "raw_description": item.get("raw_description"),
+            "name_source": item.get("name_source"),
             "original_description": item.get("description", ""),
             "is_discount": bool(item.get("is_discount")),
             "taxable": item.get("taxable"),
@@ -611,6 +644,7 @@ class ReviewPane:
                 category_id=chosen_id,
                 category_source=source,
                 raw_description=expansion,
+                name_source=record["name_source"] if expansion else None,
                 sku=record["sku"],
                 is_discount=record["is_discount"],
                 taxable=record["taxable"],
@@ -644,6 +678,42 @@ class ReviewPane:
         self.win.set_activity(
             t("Receipt #") + str(receipt_id) + " "
             + (t("confirmed") if confirm else t("saved as a draft")))
+        self._enrich_after_save(receipt_id)
+
+    def _enrich_after_save(self, receipt_id: int) -> None:
+        """Look up and translate anything the reviewer just typed.
+
+        A line added or renamed by hand has never been through a scan, so
+        nothing had ever offered it a product name or a translation. Runs in the
+        scan pool because both are network calls and the interface thread must
+        never wait on one.
+        """
+        if not pipeline.submit_enrich(receipt_id):
+            return
+        # The pane was just rebuilt from what was saved, so this is what the
+        # reviewer's screen holds with no edits on top of it. Compared again
+        # before refreshing, so a pass that finishes while they are typing does
+        # not throw their typing away.
+        self._settled = self._snapshot()
+        self._enrich_waits = 0
+        self.frame.after(500, lambda: self._finish_enrich(receipt_id))
+
+    def _snapshot(self):
+        try:
+            return self._collect()
+        except Exception:  # a half-typed field is not worth a traceback
+            return None
+
+    def _finish_enrich(self, receipt_id: int) -> None:
+        self._enrich_waits += 1
+        if pipeline.busy() and self._enrich_waits < ENRICH_MAX_WAITS:
+            self.frame.after(500, lambda: self._finish_enrich(receipt_id))
+            return
+        if self.receipt is None or self.receipt["id"] != receipt_id:
+            return          # they moved to another receipt; leave it alone
+        if self._settled is None or self._snapshot() != self._settled:
+            return          # they have started editing again
+        self.page.refresh(select=receipt_id)
 
     def save_draft(self) -> None:
         self._save(confirm=False)

@@ -20,14 +20,17 @@ from typing import Iterable
 
 from ..db import connect
 from .product_names import Found, resolve_many
-from .translate import chinese_for
+from .shorthand import expand
+from .translate import cached_state, chinese_for
 from .upc import barcode_for, check_digit, is_valid
 
 __all__ = [
     "Found",
     "barcode_for",
-    "chinese_for",
+    "cached_state",
     "check_digit",
+    "chinese_for",
+    "expand",
     "is_valid",
     "names_for_skus",
 ]

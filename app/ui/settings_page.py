@@ -21,6 +21,7 @@ from .theme import Button, Card, entry, field_label
 ENGINES = (
     ("Auto — Claude vision, then offline OCR", "auto"),
     ("Claude vision only", "claude"),
+    ("Offline OCR only (RapidOCR — full build)", "rapid"),
     ("Offline OCR only (built into Windows)", "windows"),
     ("Offline OCR only (Tesseract)", "tesseract"),
     ("Manual entry only (no scanning)", "manual"),

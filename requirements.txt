@@ -36,3 +36,19 @@ pytest==9.1.1
 # Build-only: produces dist\Bookkeeping.exe from Bookkeeping.spec (build.bat
 # installs this on demand, so a machine that only runs the app does not need it).
 pyinstaller==6.22.2
+
+# --- optional, and only in the full build -----------------------------------
+#
+# RapidOCR reads receipts markedly better than the Windows engine: on the six
+# receipts confirmed by hand it matched 73 printed lines against 63, missed 4
+# against 14, invented none against 3, and got 59 item names exactly right
+# against 37. It is PaddleOCR's PP-OCR models converted to ONNX, so it needs
+# neither PaddlePaddle nor PyTorch, runs on the CPU and never goes online.
+#
+# NOT installed by default, because it costs 95 MB in the frozen executable and
+# about 1.7 seconds of start-up, and this application's first promise is one
+# file you can copy onto a USB stick. `build.bat --full` installs these and
+# bundles them; `build.bat` on its own does neither.
+#
+#   rapidocr==3.9.2
+#   onnxruntime==1.29.0

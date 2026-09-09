@@ -168,7 +168,12 @@ def test_the_line_items_that_are_read_have_the_right_amounts(receipt):
     for description, amount in [
         ("BEDINABAG", "29.72"), ("GV TWIST MOP", "10.88"), ("COKE", "3.04"),
         ("CLX PLNGR", "17.76"), ("PROTEINSUPPL", "23.18"),
-        ("TIDE PODS 57", "17.94"), ("GAIN", "0.97"), ("AIM TP 5.50Z", "0.98"),
+        ("TIDE PODS 57", "17.94"), ("GAIN", "0.97"),
+        # The engine returns "5.50Z" here and the paper says "5.5OZ"; the
+        # zero-for-O repair added in 1.17.0 puts it back. This expectation used
+        # to record the misreading, so it is the test that changed rather than
+        # the fixture -- the words below it are still exactly what OCR produced.
+        ("AIM TP 5.5OZ", "0.98"),
     ]:
         assert (description, amount) in found
 
@@ -213,3 +218,81 @@ def test_an_unknown_language_is_refused_with_an_actionable_message():
     ok, detail = WindowsOcrExtractor(language="xx-XX").available()
     assert not ok
     assert "language pack" in detail
+
+
+# ---------------------------------------- merging the two passes' merchants
+
+def _reading(text: str):
+    return parse_receipt_text(text)
+
+
+def test_a_recognised_shop_beats_the_other_pass_s_guess():
+    """The exact case the Costco photograph produces.
+
+    The full-size pass reads the logo as "=WHOLESAZE" and falls back to the
+    street address beneath it; the downscaled pass reads it as "Cosrco" and
+    recognises Costco. The address is a value, not a blank, so filling empty
+    fields is not enough -- it would keep the address and discard the shop.
+    """
+    from app.extract.windows_ocr import merge_readings
+
+    primary = _reading("=WHOLESAZE\n455 Anywhere Rd\nSPINACH 4.69\nTOTAL 4.69\n")
+    secondary = _reading("Cosrco\n455 Anywhere Rd\nSPINACH 4.69\nTOTAL 4.69\n")
+    assert primary.merchant != "Costco", "precondition: this pass could not read it"
+
+    merged = merge_readings(primary, secondary)
+    assert merged.merchant == "Costco"
+    assert merged.merchant_raw == "Cosrco"
+
+
+def test_a_shop_the_primary_recognised_is_left_alone():
+    """Only a guess is overridden. Two recognised shops keep the primary's."""
+    from app.extract.windows_ocr import merge_readings
+
+    primary = _reading("WALMART\n1 Main St\nMILK 3.24\nTOTAL 3.24\n")
+    secondary = _reading("TARGET\n1 Main St\nMILK 3.24\nTOTAL 3.24\n")
+    assert merge_readings(primary, secondary).merchant == "Walmart"
+
+
+def test_a_guess_survives_when_neither_pass_recognised_a_shop():
+    """Nothing recognised anywhere means the fallback still gets to answer."""
+    from app.extract.windows_ocr import merge_readings
+
+    primary = _reading("CORNER BAKERY\n1 Main St\nBUN 2.00\nTOTAL 2.00\n")
+    secondary = _reading("CORNER BAKERT\n1 Main St\nBUN 2.00\nTOTAL 2.00\n")
+    assert merge_readings(primary, secondary).merchant == "Corner Bakery"
+
+
+# ------------------------------- grouping along a tilted baseline (1.17.0)
+
+
+def _tilted(baseline_y, skew, height=40.0):
+    """One printed line of three columns, on a baseline of the given slope."""
+    return [Word(f"c{i}", x, baseline_y + skew * (x + 50) - height / 2, 100.0, height)
+            for i, x in enumerate((0.0, 400.0, 800.0))]
+
+
+def test_a_printed_line_on_a_tilted_baseline_stays_one_row():
+    """A photograph taken by hand is never quite square, and on a receipt the
+    columns sit far enough apart that a slope too small to notice separates
+    them: at 0.05 -- under three degrees -- the right-hand column of a line
+    lands 40px below its left-hand one, well past a 40px row's tolerance."""
+    words = _tilted(100.0, 0.05) + _tilted(400.0, 0.05)
+
+    assert len(group_rows(words, skew=0.0)) > 2, (
+        "the fixture is meant to be mis-grouped without the correction")
+    assert len(group_rows(words, skew=0.05)) == 2
+
+
+def test_the_columns_end_up_in_the_row_they_were_printed_on():
+    rows = group_rows(_tilted(100.0, 0.05) + _tilted(400.0, 0.05), skew=0.05)
+    assert [[w.text for w in row] for row in rows] == [["c0", "c1", "c2"]] * 2
+
+
+def test_no_skew_groups_exactly_as_it_always_did():
+    """Windows OCR and Tesseract return upright rectangles and pass no slope,
+    so their behaviour has to be untouched by any of this."""
+    words = _tilted(100.0, 0.0) + _tilted(400.0, 0.0)
+    assert group_rows(words) == group_rows(words, skew=0.0)
+    assert len(group_rows(words)) == 2
+

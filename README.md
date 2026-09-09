@@ -111,12 +111,18 @@ Recognition is. The app is not *entirely*, and the difference is worth stating p
 | **Tesseract** — optional second offline reader | No | No | off unless installed |
 | **Claude vision** — the most accurate reader | Yes | **Your own** Anthropic key | unavailable without a key |
 | **Barcode → product name** — Open Food Facts, UPCitemdb | Yes, keyless | No | **on** |
+| **Till shorthand → plain English** — a local table | No | No | always |
 | **Item translation** — keyless endpoints | Yes, keyless | No | on, but only acts when the UI is Chinese |
 
-The two enrichments are switchable in Settings, and both degrade to a no-op rather than an
-error. The barcode lookup exists because nothing local can turn a till's `CLX PLNGR` into
-"Clorox Plunger & Toilet Brush" — the words are simply not in the string. **It sends only the
-barcode printed beside an item, never the shop, the date, or the price.**
+The two networked enrichments are switchable in Settings, and both degrade to a no-op rather
+than an error. The barcode lookup exists because nothing local can turn a till's `CLX PLNGR`
+into "Clorox Plunger & Toilet Brush" — the words are simply not in the string. **It sends only
+the barcode printed beside an item, never the shop, the date, or the price.**
+
+The shorthand expansion is the offline half of the same job, for chains that print no barcode to
+look up: it rewrites the abbreviations a chain uses on every receipt (`KS` → Kirkland Signature
+at Costco, `ORG` → Organic, `CROISS` → Croissants) and leaves anything it cannot be sure of
+exactly as printed.
 
 Separately from the network question: the app can **hide the personal details a receipt carries**,
 showing the digits of a card or membership number as asterisks. It is on by default, toggled with
@@ -165,14 +171,15 @@ produces the single `.exe`. **344 tests**; 13,227 lines of Python across 51 file
 
 Working and measured. Not finished, and the gaps are listed on purpose:
 
-- **Only 1 of 6 receipt photographs is transcribed by hand**, so the line-level accuracy above is
-  a claim about one receipt. The other five are scored on self-consistency only.
+- **Only 1 of 7 receipt photographs is transcribed by hand**, so the line-level accuracy above is
+  a claim about one receipt. The other six are scored on self-consistency only.
 - **Three supermarket chains, tested** — Walmart, Aldi and Costco. It has never seen a restaurant
   or fuel receipt, which would break several structural parsing assumptions.
-- **Costco is read only partly.** Its tax and total are now correct, but seven of sixteen line
-  items are missed and the subtotal is lost in OCR (`SUBTOTAL 188.37` comes back as `SUBT TRL`
-  with no amount). Costco was the first receipt here to charge **two tax rates at once**, which
-  broke the summary parser outright — see the 1.12.0 entry in `Bookkeeping.md`.
+- **Costco is read only partly.** Its shop, tax and total are now correct and its lines are
+  named and categorised, but seven of sixteen line items are still missed and the subtotal is
+  lost in OCR (`SUBTOTAL` comes back as `SUBT TRL` with no amount). Costco was the first receipt
+  here to charge **two tax rates at once**, which broke the summary parser outright — see the
+  1.12.0 and 1.13.0 entries in `Bookkeeping_record.md`.
 - **ALDI resolves 0 of 18 product names**, and this one will not be fixed: ALDI prints internal
   article numbers rather than barcodes, so there is nothing for a barcode lookup to resolve. ALDI
   already prints readable names, so there is also nothing to expand.
@@ -189,7 +196,7 @@ Working and measured. Not finished, and the gaps are listed on purpose:
 
 ## Development notes
 
-**[`Bookkeeping.md`](Bookkeeping.md) is the real documentation** — roughly 2,100 lines covering
+**[`Bookkeeping_record.md`](Bookkeeping_record.md) is the real documentation** — roughly 2,100 lines covering
 the architecture, every design decision with the alternatives that were rejected, the full fix
 history, and the reasoning behind each feature. It is written to be picked up cold by someone
 who has never seen the project.

@@ -28,6 +28,7 @@ def check(
     items: list[dict],
     confidence: float | None,
     duplicate_of: int | None = None,
+    items_sold: int | None = None,
 ) -> list[str]:
     """Return every problem found with this reading; empty means it looks sound."""
     flags: list[str] = []
@@ -111,12 +112,57 @@ def check(
                 f"of {total_cents / 100:.2f}."
             )
 
+    missing_lines = _lines_missing(items, items_sold)
+    if missing_lines:
+        # "At least", because the figure is a net one: a line the reader
+        # invented hides a line it missed, so the true shortfall can be larger.
+        flags.append(
+            f"The receipt says {items_sold} items were sold, but only "
+            f"{items_sold - missing_lines} were read — at least {missing_lines} "
+            "line(s) are missing."
+        )
+
     if confidence is not None and confidence < LOW_CONFIDENCE:
         flags.append(
             f"The engine reported low confidence ({confidence:.2f}) in this reading."
         )
 
     return flags
+
+
+def _lines_missing(items: list[dict], items_sold: int | None) -> int | None:
+    """How many purchased lines the receipt's own count says are absent.
+
+    The subtotal says how much money is unaccounted for; this says how many
+    lines to go looking for, which is what tells a reviewer when they have
+    finished. On the Costco photograph the difference is between "off by 59.22"
+    and "six lines are missing".
+
+    **Two things are not counted as items sold**, because the tills do not count
+    them either -- verified against all six confirmed receipts, where every one
+    then agrees exactly:
+
+    * discounts and coupons, which are negative lines rather than purchases;
+    * container deposits. Walmart prints 21 items sold against 24 printed lines,
+      and 7 against 9, the difference being three and two Maine bottle deposits.
+      Matched on the word DEPOSIT, the same way the seeded categorisation rule
+      matches it, because the wording is state-specific and the word is not.
+
+    Only a shortfall is reported. Reading *more* lines than the receipt sold is
+    real evidence of an invented line, but it is also what a misread count looks
+    like -- the second OCR pass of the Costco receipt turns 16 into 6 -- and a
+    flag that sends a reviewer hunting for a line that does not exist is worse
+    than no flag.
+    """
+    if not items_sold or not items:
+        return None
+    purchases = sum(
+        1 for item in items
+        if not item.get("is_discount")
+        and "DEPOSIT" not in (item.get("description") or "").upper()
+    )
+    shortfall = items_sold - purchases
+    return shortfall if shortfall > 0 else None
 
 
 def _parse_date(value: str) -> date | None:

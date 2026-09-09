@@ -23,7 +23,7 @@ from .paths import default_data_dir
 
 log = logging.getLogger("bookkeeping.db")
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS receipt (
     tip_cents      INTEGER,
     total_cents    INTEGER,
     payment_method TEXT,
+    items_sold     INTEGER,          -- the count the receipt prints for itself
     category_id    INTEGER REFERENCES category(id) ON DELETE SET NULL,
     notes          TEXT,
     engine         TEXT,             -- claude | windows | tesseract | manual
@@ -102,6 +103,8 @@ CREATE TABLE IF NOT EXISTS line_item (
     line_no          INTEGER NOT NULL DEFAULT 0,
     description      TEXT NOT NULL DEFAULT '',
     raw_description  TEXT,
+    name_source      TEXT,            -- barcode | shorthand | model |
+                                     -- notfound (asked, nobody knew) | NULL
     sku              TEXT,
     quantity         REAL,
     unit_price_cents INTEGER,
@@ -421,6 +424,33 @@ BUILTIN_RULES: list[tuple[str, str, str, int]] = [
     ("PETSMART", "Pets", "merchant", 200),
 ]
 
+
+# Added in schema version 7, after the first Costco receipt. Costco's shorthand
+# is a third dialect again: not Walmart's compressed brands ("GV", "CLX") and
+# not Aldi's plain English, but ordinary grocery nouns clipped or run together.
+# Seven of its fifteen distinct lines matched no keyword rule at all.
+#
+# These three are what the receipt supports without guessing. Each names a food
+# outright, and none of them hides inside another word -- the test from §11.22
+# that keeps EGGS out of LEGGINGS.
+#
+# **What is deliberately not here**, because the receipt does not say and a rule
+# would be inventing it:
+#
+#   * WINGS, for the line "GP WINGS". It would be a food rule, but WINGS sits
+#     inside SWINGS, which is a child's climbing frame rather than lunch.
+#   * KS CAL, KSDAILY and KSBLUEDISH. Each has an obvious-looking reading --
+#     calcium, a daily multivitamin, dish soap -- and each of those readings is
+#     a guess about somebody's shopping. They are taxed at Maine's general
+#     merchandise rate on the paper, which says they are not food but not what
+#     they are, so they stay uncategorised and the reviewer decides.
+RULES_ADDED_IN_V7: list[tuple[str, str, str, int]] = [
+    ("DRUMSTICK", "Groceries", "description", 60),
+    # Matches the printed "CROISS" and the expanded "Croissants" alike.
+    ("CROISS", "Groceries", "description", 60),
+    ("CAGE FREE", "Groceries", "description", 60),
+]
+
 DEFAULT_SETTINGS = {
     "engine": "auto",                 # auto | claude | windows | tesseract | manual
     "anthropic_api_key": "",
@@ -552,6 +582,45 @@ def _migrate(db: sqlite3.Connection, previous: int) -> None:
         if added:
             log.info("Added %d built-in categorisation rules for plain-English "
                      "grocery names", added)
+
+    if previous < 7:
+        # Version 7 records where a line's expansion came from, and adds the
+        # Costco grocery nouns in RULES_ADDED_IN_V7.
+        #
+        # The column is added by hand because SQLite's CREATE TABLE IF NOT
+        # EXISTS leaves an existing table exactly as it is: the statement in
+        # SCHEMA above only reaches a database created after this version, and
+        # without this clause every older set of books would keep a line_item
+        # table with no name_source and fail on the next scan.
+        if not _has_column(db, "line_item", "name_source"):
+            db.execute("ALTER TABLE line_item ADD COLUMN name_source TEXT")
+            log.info("Added line_item.name_source")
+
+        added = _add_missing_rules(db, RULES_ADDED_IN_V7)
+        if added:
+            log.info("Added %d built-in categorisation rules for Costco's "
+                     "shorthand", added)
+
+
+    if previous < 8:
+        # Version 8 records the item count the receipt prints for itself, so the
+        # "how many lines are missing" check survives a save. Same ALTER as v7,
+        # and for the same reason: CREATE TABLE IF NOT EXISTS will not add a
+        # column to a table that already exists.
+        if not _has_column(db, "receipt", "items_sold"):
+            db.execute("ALTER TABLE receipt ADD COLUMN items_sold INTEGER")
+            log.info("Added receipt.items_sold")
+
+
+def _has_column(db: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether ``table`` already has ``column``.
+
+    A migration has to be safe to run twice -- on a database created fresh at
+    this version the column is already there from SCHEMA, and ALTER TABLE ADD
+    COLUMN raises rather than shrugging when it is.
+    """
+    return any(row["name"] == column
+               for row in db.execute(f"PRAGMA table_info({table})").fetchall())
 
 
 def _add_missing_rules(

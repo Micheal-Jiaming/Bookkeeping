@@ -31,6 +31,16 @@ APP_NAME = "Bookkeeping"
 # In 96-DPI design pixels; scaled for the actual display by Theme.px.
 MIN_SIZE = (960, 620)
 DEFAULT_SIZE = (1240, 800)
+
+# How much of the screen the *default* window fills. Inset from the edges on
+# purpose, so a first run opens a window rather than something that looks
+# maximised.
+DEFAULT_INSET = (0.92, 0.88)
+
+# Fallback fraction of the screen height treated as usable when Windows will not
+# say. See ``usable_screen`` -- the real answer comes from the OS, and this is
+# only for when the call fails or the platform is not Windows.
+ASSUMED_USABLE_HEIGHT = 0.93
 POLL_MS = 900
 
 PAGES = (
@@ -515,39 +525,101 @@ class MainWindow:
         self.root.destroy()
 
     def _restore_geometry(self) -> None:
+        screen_w, screen_h = usable_screen(self.root)
         saved = settings_store.get("window_geometry", "")
-        if saved and _geometry_is_on_screen(self.root, saved):
-            self.root.geometry(saved)
+        fitted = fit_to_screen(saved, screen_w, screen_h) if saved else None
+        if fitted:
+            self.root.geometry(fitted)
             return
-        width = self.theme.px(DEFAULT_SIZE[0])
-        height = self.theme.px(DEFAULT_SIZE[1])
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        width = min(width, int(screen_w * 0.92))
-        height = min(height, int(screen_h * 0.88))
+        width = min(self.theme.px(DEFAULT_SIZE[0]), int(screen_w * DEFAULT_INSET[0]))
+        height = min(self.theme.px(DEFAULT_SIZE[1]), int(screen_h * DEFAULT_INSET[1]))
         x = max(0, (screen_w - width) // 2)
         y = max(0, (screen_h - height) // 3)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
 
-def _geometry_is_on_screen(root: tk.Misc, geometry: str) -> bool:
-    """Reject a remembered position that would open off-screen.
+def usable_screen(root: tk.Misc) -> tuple[int, int]:
+    """The screen area a window can actually occupy, in Tk's own pixels.
 
-    Unplugging the second monitor the app was last used on would otherwise leave
-    the window invisible at, say, +2400+300 with no way to get it back.
+    ``winfo_screenheight`` reports the whole display and counts the taskbar's
+    pixels as available, so a window sized or placed against it ends up with its
+    bottom rows -- here, the row of buttons that saves a receipt -- behind the
+    taskbar. Windows knows the real answer and will give it: ``SPI_GETWORKAREA``
+    returns the desktop rectangle minus the taskbar and any other appbars,
+    wherever the user has docked them.
+
+    The numbers come back in physical pixels, which is what Tk is also using
+    once ``_enable_dpi_awareness`` has run -- on this machine both report 3840
+    wide rather than the 2560 a non-aware process would see. Anything that goes
+    wrong falls back to a fraction of the reported screen, which is a guess but
+    a conservative one.
+    """
+    screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            rect = wintypes.RECT()
+            # 0x0030 is SPI_GETWORKAREA.
+            if ctypes.windll.user32.SystemParametersInfoW(
+                0x0030, 0, ctypes.byref(rect), 0
+            ):
+                width = rect.right - rect.left
+                height = rect.bottom - rect.top
+                # Sanity-check rather than trust: a plausible work area is at
+                # most the screen and not a sliver of it.
+                if 0 < width <= screen_w and screen_h * 0.5 < height <= screen_h:
+                    return width, height
+        except Exception:
+            log.debug("Could not read the desktop work area", exc_info=True)
+    return screen_w, int(screen_h * ASSUMED_USABLE_HEIGHT)
+
+
+def fit_to_screen(geometry: str, screen_w: int, screen_h: int) -> str | None:
+    """A remembered geometry brought back onto the screen, or None if unusable.
+
+    **Clamped rather than accepted or rejected**, which is the change. The old
+    test asked only whether the window's top-left corner landed somewhere
+    visible, and said nothing about its size -- so a geometry of
+    ``2461x1733+421+1034`` passed on a 2560x1440 desktop, because the corner is
+    on screen even though the window is taller than the display and starts two
+    thirds of the way down it. Most of the window, including the row of buttons
+    that saves a receipt, opened below the bottom edge.
+
+    Clamping is preferred to rejecting because rejecting throws away the size
+    the user chose and reverts to the default. Here their size is kept wherever
+    it fits, and only the parts that do not fit are corrected.
+
+    **This matters more for this application than for most**, because it is
+    meant to be copied onto a USB stick and run elsewhere: the books travel with
+    the program and ``window_geometry`` travels inside them, so a geometry saved
+    on a 4K desktop routinely arrives on a laptop that cannot show it.
+
+    ``screen_w`` and ``screen_h`` are the *usable* area from ``usable_screen``,
+    not the raw display, so clamping to the bottom edge does not put the window
+    behind the taskbar. Pure, and takes them as numbers rather than a widget, so
+    the arithmetic can be tested without opening a window.
+
+    Only the primary monitor is considered, which is deliberate and unchanged: a
+    window remembered on a second display that is no longer attached has to come
+    back to this one, or it is invisible with no way to retrieve it.
     """
     try:
-        size, x, y = geometry.replace("-", "+-").split("+")[0], None, None
         parts = geometry.split("+")
-        size = parts[0]
+        width, height = (int(value) for value in parts[0].split("x"))
         x, y = int(parts[1]), int(parts[2])
-        width, height = (int(value) for value in size.split("x"))
     except (ValueError, IndexError):
-        return False
-    if width < 640 or height < 420:
-        return False
-    return (-20 <= x <= root.winfo_screenwidth() - 200
-            and -20 <= y <= root.winfo_screenheight() - 150)
+        return None
+    if width < MIN_SIZE[0] or height < MIN_SIZE[1]:
+        # Too small to be a window this application ever opened; more likely a
+        # corrupted setting than a size worth honouring.
+        return None
+    width = min(width, screen_w)
+    height = min(height, screen_h)
+    x = max(0, min(x, screen_w - width))
+    y = max(0, min(y, screen_h - height))
+    return f"{width}x{height}+{x}+{y}"
 
 
 def run(argv: list[str] | None = None) -> int:

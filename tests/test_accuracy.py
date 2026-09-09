@@ -231,6 +231,87 @@ def test_a_new_receipt_is_reported_but_is_not_a_failure_of_the_reader(tmp_path):
     assert problems and "not in the baseline" in problems[0]
 
 
+# ------------------------------------------- which engine produced the numbers
+
+
+def test_a_baseline_from_another_engine_is_refused_rather_than_compared(tmp_path):
+    """The reason this harness grew an engine flag at all.
+
+    RapidOCR matches ten more lines per corpus than Windows OCR does. Scored
+    against a Windows baseline every one of those looks like an improvement the
+    code earned, and in the other direction a slim build looks catastrophically
+    broken. Both readings are arithmetic about nothing, so the comparison has to
+    decline to make it.
+    """
+    from tools.accuracy import Score
+    from tools.measure_accuracy import compare
+
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps({"engine": "windows", "receipts": {
+        "r.jpg": {"lines_matched": 63, "lines_invented": 3},
+    }}), encoding="utf-8")
+
+    problems = compare([Score(photo="r.jpg", lines_matched=73)], baseline, "rapid")
+    assert len(problems) == 1, problems
+    assert "not comparable" in problems[0]
+    # And specifically not a per-metric report, which would read as a verdict.
+    assert "lines matched" not in problems[0]
+
+
+def test_a_baseline_with_no_engine_recorded_is_taken_as_the_windows_one():
+    """Every baseline written before 1.17.0 predates the flag, and Windows OCR
+    is the only engine that could have produced one."""
+    from tools.accuracy import Score
+    from tools.measure_accuracy import compare
+    import json as _json
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        baseline = Path(tmp) / "baseline.json"
+        baseline.write_text(_json.dumps({"receipts": {"r.jpg": {"lines_matched": 5}}}),
+                            encoding="utf-8")
+        assert compare([Score(photo="r.jpg", lines_matched=5)], baseline, "windows") == []
+        assert compare([Score(photo="r.jpg", lines_matched=5)], baseline, "rapid")
+
+
+def test_each_engine_gets_its_own_baseline_file():
+    from tools.accuracy import baseline_path_for
+
+    assert baseline_path_for("rapid").name == "accuracy_baseline.rapid.json"
+    assert baseline_path_for("windows") != baseline_path_for("rapid")
+
+
+def test_auto_never_resolves_to_claude():
+    """It costs money, needs a key, and -- the reason that actually decides it --
+    its reading is not deterministic, so it cannot back a regression gate."""
+    from tools.measure_accuracy import MEASURABLE, resolve_engine
+
+    assert "claude" not in MEASURABLE
+    assert resolve_engine("auto").name in MEASURABLE
+
+
+def test_a_misspelled_engine_is_refused_rather_than_falling_back():
+    """`build_engines` answers an unknown name with the whole fallback list,
+    whose first entry is Claude. Taking it would turn a typo into a paid,
+    non-deterministic run of the very engine `auto` excludes."""
+    from tools.measure_accuracy import resolve_engine
+
+    with pytest.raises(SystemExit) as raised:
+        resolve_engine("rapidocr")
+    assert "no engine called" in str(raised.value)
+
+
+def test_the_harness_measures_the_engine_the_application_would_use():
+    """The defect this replaced: the harness read Windows OCR unconditionally,
+    so `--check` guarded an engine the full build had stopped using."""
+    from app.extract import build_engines
+    from tools.measure_accuracy import resolve_engine
+
+    would_use = [e.name for e in build_engines({"engine": "auto"})
+                 if e.name != "claude" and e.available()[0]]
+    assert resolve_engine("auto").name == would_use[0]
+
+
 # ------------------------------------------------------------- integration
 
 
@@ -251,3 +332,134 @@ def test_the_harness_runs_against_the_real_photographs():
     assert scores, "photographs are present but nothing was scored"
     for score in scores:
         assert not any("PHOTO CHANGED" in note for note in score.notes), score.photo
+
+
+# --------- exporting confirmed receipts as truth (1.15.0)
+
+def _books_with(tmp_path, rows):
+    """A throwaway database holding the receipts described by ``rows``."""
+    import sqlite3
+    from app import db as appdb
+    data = tmp_path / "data"
+    (data / "images").mkdir(parents=True)
+    appdb.DATA_DIR, appdb.IMAGE_DIR = data, data / "images"
+    appdb.DB_PATH = data / "bookkeeping.db"
+    appdb.init_db()
+    with appdb.connect() as conn:
+        for name, status, header, items in rows:
+            cur = conn.execute(
+                "INSERT INTO receipt (status, original_name, merchant, purchased_at,"
+                " subtotal_cents, tax_cents, total_cents, currency, created_at,"
+                " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'USD', '', '')",
+                (status, name, *header))
+            for index, (description, cents) in enumerate(items):
+                conn.execute(
+                    "INSERT INTO line_item (receipt_id, line_no, description,"
+                    " amount_cents) VALUES (?, ?, ?, ?)",
+                    (cur.lastrowid, index, description, cents))
+    return appdb.DB_PATH
+
+
+def _photo(tmp_path, name: str) -> Path:
+    photos = tmp_path / "pictures"
+    photos.mkdir(exist_ok=True)
+    (photos / name).write_bytes(b"not really a jpeg, but it hashes")
+    return photos
+
+
+def test_a_confirmed_receipt_becomes_a_truth_record(tmp_path):
+    """The point of the whole thing: hand-verification stops being disposable."""
+    from tools.export_truth import collect
+    db_path = _books_with(tmp_path, [
+        ("SHOP1.jpg", "confirmed", ("Shop", "2026-09-06", 1000, 50, 1050),
+         [("MILK", 400), ("BREAD", 600)]),
+    ])
+    entries, _notes = collect(db_path, _photo(tmp_path, "SHOP1.jpg"))
+    assert list(entries) == ["SHOP1.jpg"]
+    entry = entries["SHOP1.jpg"]
+    assert entry["header"] == {"merchant": "Shop", "purchased_at": "2026-09-06",
+                               "subtotal": "10.00", "tax": "0.50", "total": "10.50"}
+    assert entry["lines"] == [["MILK", "4.00"], ["BREAD", "6.00"]]
+    assert entry["verified_by"] == "confirmed-in-app"
+    assert entry["sha256"], "the record has to be bound to the image it describes"
+
+
+def test_a_receipt_still_under_review_is_not_truth(tmp_path):
+    """Only the reviewer's sign-off makes a reading evidence."""
+    from tools.export_truth import collect
+    db_path = _books_with(tmp_path, [
+        ("SHOP1.jpg", "needs_review", ("Shop", "2026-09-06", 1000, 50, 1050),
+         [("MILK", 1000)]),
+    ])
+    entries, _notes = collect(db_path, _photo(tmp_path, "SHOP1.jpg"))
+    assert entries == {}
+
+
+def test_truth_about_a_photograph_nobody_has_is_reported_not_written(tmp_path):
+    from tools.export_truth import collect
+    db_path = _books_with(tmp_path, [
+        ("GONE.jpg", "confirmed", ("Shop", "2026-09-06", 1000, 50, 1050),
+         [("MILK", 1000)]),
+    ])
+    entries, notes = collect(db_path, _photo(tmp_path, "OTHER.jpg"))
+    assert entries == {}
+    assert any("GONE.jpg" in note for note in notes)
+
+
+def test_a_transcription_from_the_paper_outranks_what_the_books_hold(tmp_path):
+    """Walmart1's header is out of frame, so the paper has no merchant and no
+    date -- but the books hold both, because the reviewer typed them. The
+    tracked record says *verified absent* and is right; the export must not
+    quietly overwrite it, and the disagreement is worth printing."""
+    from tools.export_truth import collect
+    db_path = _books_with(tmp_path, [
+        ("Walmart1.jpg", "confirmed", ("Walmart", "2026-08-18", 14194, 750, 14944),
+         [("BEDINABAG", 2972)]),
+    ])
+    entries, notes = collect(db_path, _photo(tmp_path, "Walmart1.jpg"))
+    assert "Walmart1.jpg" not in entries
+    assert any("merchant" in note for note in notes)
+
+
+def test_a_placeholder_is_filled_in_rather_than_deferred_to(tmp_path, monkeypatch):
+    """Most tracked entries name a photograph and assert nothing about it. Those
+    are not evidence, and treating them as coverage silently exported nothing
+    for five of the six receipts on the first attempt at this."""
+    from tools import export_truth
+    from tools.accuracy import Truth
+    monkeypatch.setattr(export_truth, "load_truth",
+                        lambda *a, **k: {"SHOP1.jpg": Truth(photo="SHOP1.jpg")})
+    db_path = _books_with(tmp_path, [
+        ("SHOP1.jpg", "confirmed", ("Shop", "2026-09-06", 1000, 50, 1050),
+         [("MILK", 1000)]),
+    ])
+    entries, _notes = export_truth.collect(db_path, _photo(tmp_path, "SHOP1.jpg"))
+    assert "SHOP1.jpg" in entries
+
+
+def test_the_local_file_never_overrides_a_real_tracked_record(tmp_path):
+    from tools.accuracy import load_truth
+    tracked = tmp_path / "tracked.json"
+    local = tmp_path / "local.json"
+    tracked.write_text(json.dumps({"receipts": {
+        "A.jpg": {"header": {"merchant": None}, "lines": [["X", "1.00"]]},
+        "B.jpg": {},
+    }}), encoding="utf-8")
+    local.write_text(json.dumps({"receipts": {
+        "A.jpg": {"header": {"merchant": "Walmart"}, "lines": [["Y", "2.00"]]},
+        "B.jpg": {"header": {"merchant": "Aldi"}, "lines": [["Z", "3.00"]]},
+        "C.jpg": {"header": {"merchant": "Costco"}, "lines": None},
+    }}), encoding="utf-8")
+
+    truths = load_truth(tracked, local)
+    assert truths["A.jpg"].header == {"merchant": None}, "a real record wins"
+    assert truths["B.jpg"].header == {"merchant": "Aldi"}, "a placeholder is filled"
+    assert truths["C.jpg"].header == {"merchant": "Costco"}, "a new photo is added"
+
+
+def test_the_merchant_is_compared_without_its_capitals():
+    """A reviewer types ALDI as the sign prints it; the parser returns Aldi."""
+    from tools.accuracy import Truth, score_reading
+    receipt = ExtractedReceipt(currency="USD", merchant="Aldi")
+    score = score_reading(receipt, Truth(photo="x.jpg", header={"merchant": "ALDI"}))
+    assert score.header_correct == 1

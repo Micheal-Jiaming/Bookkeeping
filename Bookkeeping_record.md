@@ -18,10 +18,10 @@ reasoning behind it, the exact commands, what has been verified and what has
 not, and the history of fixes that must not be regressed.
 
 - **Location:** `D:\claude\Bookkeeping`
-- **Version:** 1.4.1 (see `VERSION`)
-- **Ships as:** `dist\Bookkeeping.exe` — one file, 29.2 MB, Windows x64, no installer
+- **Version:** 1.17.0 (see `VERSION`)
+- **Ships as:** two builds from one spec — `dist\Bookkeeping.exe` (30.2 MB, Windows OCR, the portable one) and `dist\BookkeepingFull.exe` (125.5 MB, adds RapidOCR and reads markedly better). Windows x64, no installer either way
 - **Stack:** Python 3.13 · **Tkinter** · SQLite · PyInstaller
-- **Recognition:** Claude vision (`claude-opus-5`) primary; Windows' built-in OCR offline, needing no key or install; Tesseract optional
+- **Recognition:** Claude vision (`claude-opus-5`) primary; **RapidOCR** offline in the full build; Windows' built-in OCR offline in both, needing no key or install; Tesseract optional
 - **Locale:** USD-primary, English interface (currency stored per receipt)
 
 ---
@@ -36,7 +36,7 @@ From the user, 2026-08-23, in the order they arrived:
    images such as Walmart receipts, have the app recognise the content and
    categorise the expenses.
 3. Keep everything under `D:\claude\Bookkeeping`.
-4. Document everything in `Bookkeeping.md`, and keep it updated in step with the
+4. Document everything in `Bookkeeping_record.md`, and keep it updated in step with the
    code.
 5. **It must be an executable (.exe) that runs on a PC, and portable, so other
    people can use it on their own computers.** (Delivered in 1.1.0.)
@@ -385,6 +385,182 @@ on every scan and would exhaust the free quota on questions already answered. A
 miss is retried after 30 days, because these catalogues grow.
 
 
+### Naming a Costco line, where no barcode can (1.13.0)
+
+The barcode route above is the better answer wherever it works, and at Costco it
+cannot work at all. Costco prints a five- to seven-digit **item number** of its
+own devising beside each line — 96716, 1199652 — not a UPC. `barcode_for`
+correctly declines every one of them, so there is nothing to query and no
+catalogue on earth that could answer if there were. This is Aldi's problem
+(§9) again, and worse: Aldi at least prints readable names.
+
+**Costco's own website is not the way round it, and this was measured rather
+than assumed.** `costco.com` serves its home page to a program quite happily
+(HTTP 200, 3.9 MB), and then answers both
+
+* the catalogue search, `/CatalogSearch?keyword=1199652`, and
+* any product page, `/….product.NNNNNNNNN.html`
+
+with **403 Forbidden** and an Akamai "Access Denied" body — not a missing
+product, a refusal. `search.costco.com`'s query API answers 403 as well. It is
+the same wall walmart.com puts up, and it does not come down for a different
+User-Agent, because it is not a User-Agent check. Do not spend another session
+on it.
+
+So the expansion has to come from what is already printed, which is `app/lookup/
+shorthand.py`. Less than a catalogue gives, and not nothing: most of what makes
+a Costco line unreadable is a handful of abbreviations the chain uses the same
+way on every receipt it prints. `KS` is Kirkland Signature, `ORG` is organic,
+`CROISS` is croissants, `500CT` is a pack size, and `KSDAILY` is the first of
+those run into the next word.
+
+**Why bother, when the printed name is right there on screen.** Two things
+downstream read the name rather than showing it. `resolve_category` searches the
+expansion as well as the printed text, and the Chinese translation is made from
+it — and a general-purpose translator handed till shorthand produces confident
+nonsense. Measured, printed against expanded:
+
+| printed | Chinese from the printed name | expanded | Chinese from the expansion |
+| --- | --- | --- | --- |
+| `DRUMSTICKS` | 鼓槌 — the thing you hit a drum with | *(needs no expansion)* | 鸡腿, via the glossary |
+| `BUTER CROISS` | 黄油克罗斯 | Butter Croissants | 黄油牛角面包 |
+| `KS CAGE FREE` | KS 笼子免费 — "cage" and "free of charge" | Kirkland Signature Cage Free | 柯克兰招牌无笼 |
+| `KS COFFEE` | KS咖啡 | Kirkland Signature Coffee | 柯克兰招牌咖啡 |
+| `KSBLUEDISH` | 凯斯蓝迪什 — sounded out letter by letter | Kirkland Signature Bluedish | 柯克兰签名 Bluedish |
+
+`DRUMSTICKS` is the one that shows where the boundary between the two mechanisms
+falls. It needs no expansion — it is already complete English — and *that* is
+exactly why it mistranslates. Complete English is what can be ambiguous, so it
+belongs in `translate.GLOSSARY` beside `ME DEPOSIT`, not in the expander.
+
+**What may go in the expander's tables, and what may not.** Only an abbreviation
+with one meaning in a shop, which no ordinary word is spelled like. The rule the
+rest of this project works to applies here with more force than usual, because
+the expansion is shown to a reviewer as though it were the product: a guess that
+fails is harmless, and a guess that succeeds puts somebody else's goods on the
+line. So `GP WINGS`, `KSBLUEDISH` and `KS CAL 500CT` keep their `GP`,
+`BLUEDISH` and `CAL`. Chicken wings, dish soap and calcium are each the obvious
+reading and none of them is printed anywhere on the paper, and being *nearly*
+right about what somebody bought is the failure this declines to risk.
+
+`KS` is expanded only when the merchant is Costco, for the same reason: it is
+Kirkland Signature there and two letters anywhere else. `ORG` and `CROISS` are
+chain-neutral and apply everywhere.
+
+**This is why the merchant matters twice.** Getting the shop wrong does not just
+mislabel one field — it silently switches off the chain-specific half of the
+expander, and it forfeits the merchant categorisation rule. Measured on this
+receipt: with the merchant unread, 8 of 15 distinct lines land in
+`Uncategorized`; with it read as Costco, none do.
+
+### Reading a logo that OCR cannot read (1.13.0)
+
+The store name is printed as a logo, and a logo is the hardest thing on a till
+roll for OCR: large, stylised, and on the part of the paper that curls. The
+Costco receipt gave the merchant field as `455 Scarborough Downs Rd` — the
+street address printed underneath it — because an exact search for "COSTCO"
+found nothing.
+
+**How badly it is misread depends on the size the image happens to be**, which
+is the finding that shaped the fix. The same six letters, from the same
+photograph:
+
+| read at | comes back as |
+| --- | --- |
+| the original file, 1280px long edge | `Cosrco` |
+| the stored copy, 1176×1568 | *nothing at all* |
+| the stored copy downscaled again — **what the app actually sees** | `Cesrco` |
+| 1.25× | `=WHOLESAZE` — the logo's second word instead |
+| 2.5× | `=WHOLESALE` — finally correct, and only that word |
+
+There is no scale at which `COSTCO` is read correctly, and no two readings
+agree, so corroborating one against another does not work either. A third OCR
+pass at a larger size was measured and does not help.
+
+`_find_merchant` therefore runs three passes of decreasing strictness, each
+looking at fewer lines than the one before, because the weaker the test the
+closer to the top of the receipt its evidence must come from:
+
+1. **Exact substring**, over the header block — unchanged, and still what
+   answers on every other photograph in `pictures\`.
+2. **One character wrong** (`_within_one_edit`), first six lines, single-word
+   names of six characters or more. Six is the floor because one edit away from
+   a short word is simply another word: SHELL and SHELF differ by one, and a
+   line reading SHELF must never be filed under Shell.
+3. **Two characters wrong** (`_same_shape`), first three lines, and only when
+   the candidate is the same length as the name and starts and ends with the
+   same letter. MARKET is two substitutions from TARGET and Market Basket is a
+   supermarket in the same state as this receipt — the first letter is what
+   refuses it. SUBWAY against SAFEWAY is refused on length.
+
+**Why a weaker match is acceptable here and nowhere else in this project.**
+Everywhere else — rebuilding a barcode, expanding an abbreviation — a wrong
+answer is invisible: it names a product the reviewer cannot check against the
+paper. The merchant is the opposite. One field, at the top of the review pane,
+beside a photograph of the receipt, wrong in a way anybody spots and fixes in a
+second. The cost of being wrong is a visible field to correct; the cost of
+refusing is a street address in the Merchant box and every line the shop would
+have categorised left blank.
+
+The merge between the two OCR passes needed the same idea. It filled a header
+field from the second pass only when the first had left it empty, and the
+merchant is never empty — when the logo is unreadable the fallback returns the
+street address, which is a value, so it would keep the address and discard the
+`Costco` the other pass really did recognise. `is_known_merchant` distinguishes
+a recognised shop from a guess, and a recognised shop now wins whichever pass
+found it.
+
+### Looking up what the reviewer typed (1.16.0)
+
+Expansion and translation used to run in exactly one place: during a scan. A
+line added or renamed in the review pane afterwards therefore went through
+neither, ever — and the user reported it as the application ignoring what they
+had entered. It was not ignoring it. It had never been asked.
+
+`pipeline.enrich_now` runs the same two passes over the stored rows instead of a
+fresh reading, and `_save` queues it in the scan pool after every save. It
+**fills blanks and nothing else**: amounts, categories, descriptions and the
+receipt's status are left exactly as they are, so a confirmed receipt stays
+confirmed and a category the reviewer chose is never second-guessed.
+
+**Two different failures produced the same blank line**, which is why the report
+was one complaint and the fix is two:
+
+| line | what had happened |
+| --- | --- |
+| `DOVE BW 11OZ` | Added by hand, so nothing had ever looked at it. It translates perfectly well once asked — 多芬 BW 11OZ. |
+| `EQJELLUBE80Z` | Asked twice, weeks earlier. The barcode resolved to nothing and both translators returned the input unchanged. Genuinely unnameable, and the miss was cached. |
+
+The second is the one worth designing for. **A blank line reads as the program
+not having bothered**, and that is exactly how it was read, so a question that
+was asked and came back empty now says so: `no translation found` / 未找到译文
+under the line, where the answer would have gone.
+
+**Only where a question was actually put.** `FRENCH BREAD` needs no expansion and
+carries a number-system-2 code that `barcode_for` declines, so nothing was asked
+and nothing is said — a note on every plain-English line would be noise that
+teaches the reader to stop looking. Two records make the distinction:
+
+* `line_item.name_source = 'notfound'`, set when a barcode *was* resolvable and
+  the catalogues had nothing. `NULL` still means nobody asked.
+* a row in `translation` with a `NULL` zh, which the cache has always written.
+  `lookup.cached_state` is new only in exposing it: `chinese_for` returns hits
+  alone, so the pane could not tell a miss from a silence.
+
+**A service that could not be reached is not a "not found"**, and the test suite
+caught the first version of this getting it wrong. When `names_for_skus` raises,
+the lookup has learned nothing about whether the product exists; writing
+`notfound` would state a fact about the catalogue on the strength of a network
+failure, and would stop the next save from trying again. The mark is made only
+when the services actually answered.
+
+**Refreshing the pane cannot be unconditional.** The pass is network-bound and
+can take seconds, and the reviewer may well carry on typing while it runs. The
+pane snapshots what it holds immediately after the save — which is what was
+saved, with no edits on top — and refreshes when the pass finishes *only if that
+snapshot still matches*. Otherwise it leaves the screen alone: a stale grey
+subtitle costs nothing next to throwing away somebody's typing.
+
 ### Reading the interface, and the receipt, in Chinese (1.9.0)
 
 The interface switches between English and Chinese from **View → Language**, and
@@ -453,6 +629,93 @@ Brush with Carry Caddy` → Clorox 柱塞和马桶刷，带携带盒. It is mach
 translation and reads like it: `24ct Paper Bowl` comes back as 24克拉纸碗,
 having taken "ct" for carats.
 
+### A better offline reader, and what it costs (1.17.0)
+
+Windows OCR is what makes this application work with nothing installed, and it
+is the weakest part of it. The user put it plainly: *"the current visual
+recognition model is not up to the mark"* — and was right, though not about the
+model they had in mind. **Claude vision has never once run on their receipts**:
+there is no API key, so every reading they have ever seen came from the offline
+fallback.
+
+**What was surveyed.** Against the constraints that actually bind here —
+offline, CPU only, no key, and small enough to be a portable executable — most
+of the strong engines disqualify themselves on weight. docTR, EasyOCR and Surya
+all pull in PyTorch, roughly two gigabytes; the VLM readers (GOT-OCR2.0,
+dots.ocr, PaddleOCR-VL) expect a GPU; PaddleOCR itself is the accuracy leader
+and brings the PaddlePaddle runtime with it.
+
+[RapidOCR](https://github.com/RapidAI/RapidOCR) is the one that fits: Baidu's
+PP-OCR models converted to ONNX and run on ONNX Runtime, so neither PaddlePaddle
+nor PyTorch is involved. Apache 2.0, models shipped in the wheel, nothing
+downloaded at runtime, nothing sent anywhere.
+
+**Measured, through the same parser and against the receipts the user confirmed
+by hand** (which is what made this measurable at all — see 1.15.0):
+
+| | Windows OCR | RapidOCR |
+| --- | --- | --- |
+| header fields correct | 30/30 | 30/30 |
+| printed lines matched | 63 | **73** |
+| lines missed | 14 | **4** |
+| lines invented | 3 | **0** |
+| item names exactly right | 37 | **59** |
+
+The gains land where the failures were. Costco goes from 10 matched to 14 and
+from 5 names to 10; on a full scan through the pipeline it reads **15 of the 16
+items** where the Windows engine read 12, leaving 4.69 unaccounted instead of
+59.22. Aldi's names go from 3 of 18 to 9. And it reads `COSTCO` off the logo on
+the first try — the thing the three-pass merchant match in this section exists
+because Windows OCR cannot do at *any* scale.
+
+**The cost, measured rather than estimated.** `onnxruntime`, `numpy`, `opencv`
+and 32 MB of weights take the frozen executable from 30 MB to **125 MB** and its
+start-up from 3.5 to **5.2 seconds**, because a one-file build unpacks its whole
+payload to a temp folder on every launch. Reading a receipt goes from about 0.4
+to 1.6 seconds.
+
+That collides with the promise this project has made since day one — one file
+you can copy onto a USB stick — so **both builds exist**: `build.bat` gives the
+30 MB portable one, `build.bat --full` the 125 MB accurate one, and a single
+spec produces both so they cannot drift apart. The sizes, the commands and the
+spec traps are set out in §7 and deliberately not repeated here: a fact kept in
+two places is a fact corrected in one of them and missed in the other.
+
+#### Three traps, all of which cost a build to find
+
+**1. Loading WinRT first stops onnxruntime loading at all.** Build a
+`WindowsOcrExtractor` and then a `RapidOcrExtractor`, and the second fails every
+time with *"DLL load failed while importing onnxruntime_pybind11_state"*;
+reverse the order and both work. WinRT initialises the thread's COM apartment,
+and onnxruntime's extension module will not initialise underneath that.
+
+This is not a laboratory curiosity: `engine_status` asks every engine whether it
+is available at start-up, and Windows OCR answering that question is enough to
+poison RapidOCR for the rest of the session. `rapid_ocr.py` therefore loads
+onnxruntime at module import, and `app.extract` imports that module before
+anything touches WinRT. **Do not make it lazy "for consistency" with the other
+engines.**
+
+**2. Answering "is this engine available?" must not build the engine.** The
+other engines construct themselves in `available()` because doing so is
+instant. RapidOCR loads three ONNX models and takes the better part of a second
+— and `available()` runs on every draw of the Settings page and at every
+start-up. Building it there took the test suite from 90 seconds to 377. It is an
+import check now, and the cost is that a corrupt model file reads as available
+until the first scan, which then fails with a message naming the real problem.
+
+**3. Keeping something *out* of a build is harder than putting it in.** The
+slim build came out at 97 MB — cv2 alone was 29 MB of it — because PyInstaller
+follows an ordinary import even inside a function body, and then follows a
+literal module name handed to `importlib.import_module` as well. Neither of the
+usual tricks hides a dependency from it. The slim build names the exclusions
+outright in `Bookkeeping.spec`, which is the honest place for them anyway: that
+file is what decides what each build contains.
+
+A fourth, smaller one: both builds come from one spec, and PyInstaller names its
+work folder after the spec, so without an explicit `--workpath` each build threw
+away the other's analysis and re-ran from scratch.
+
 ### Categorisation precedence
 
 Implemented in `app/categorize.py`, strongest first. The same list is printed on
@@ -477,7 +740,7 @@ win would reasonably think it was broken:
 review pane as `rule` / `model` / `shop` / `you`), and the rule backfill respects
 it.
 
-176 keyword rules and 15 categories are seeded on first run (`app/db.py`),
+179 keyword rules and 15 categories are seeded on first run (`app/db.py`),
 tuned for US retail receipts: product nouns (`MOP`, `AMMONIA`, `DIAPER`,
 `UNLEADED`), single-category brands (`TIDE`, `LYSOL`, `PAMPERS`, `CLX`), and
 merchant defaults (`WALMART`, `COSTCO`, `CVS`, `SHELL`, …). **No store-brand
@@ -506,10 +769,55 @@ by 3.38)"* is actionable and *"confidence: low"* is not.
 
 Checks: missing/non-positive total, missing/invalid/future/pre-2000 date, no line
 items, items with no amount, **items vs. subtotal** (preferred) or **items + tax
-vs. total**, subtotal + tax ≠ total, implausible tax (> 50 % of the total),
-engine confidence < 0.6, and duplicate image (same SHA-256 already in the books).
-Tolerance is 5 cents, because real receipts disagree with their own arithmetic by
-a cent or two on weighted goods.
+vs. total**, subtotal + tax ≠ total, **the receipt's own item count vs. the lines
+read**, implausible tax (> 50 % of the total), engine confidence < 0.6, and
+duplicate image (same SHA-256 already in the books). Tolerance is 5 cents,
+because real receipts disagree with their own arithmetic by a cent or two on
+weighted goods.
+
+#### Counting the lines, not just the money (1.14.0)
+
+The money check says how much is unaccounted for. It does not say how many lines
+to go looking for, and that is the number a reviewer actually needs: it is what
+tells them when they have finished. *"Off by 59.22"* leaves them counting; *"at
+least 4 lines are missing"* does not.
+
+**Every chain here prints the figure**, which is what makes the check general
+rather than a Costco special case — and each prints it differently, so
+`_find_items_sold` carries one pattern per dialect:
+
+| chain | prints | shape |
+| --- | --- | --- |
+| Walmart | `ITEMS SOLD 21`, `# ITEMS SOLD 3` | count after the words |
+| Aldi | `18 ITEMS` | count first |
+| Costco | `TOTAL NUMBER OF ITEMS SOLD = 16` | OCR destroys both keywords and returns `TOTAL NUMBER OF 1 EMS sot-c 16`, so the pattern anchors on the surviving `NUMBER OF` and takes the number at the end of the line |
+
+**A bare `SOLD 16` is deliberately not matched.** The second OCR pass of the
+Costco receipt returns `sold 6` for the line that reads 16 on the paper. A
+pattern loose enough to catch it would import a wrong count, and a wrong count is
+worse than none: the flag it raises sends the reviewer hunting for lines that are
+not missing. Every pattern therefore requires a surviving keyword, and the first
+pass's 16 stands.
+
+**Two kinds of line are not "items sold", and the tills agree.** Discounts, and
+container deposits — Walmart prints 21 sold against 24 printed lines, and 7
+against 9, the difference being three and two Maine bottle deposits. Excluding
+both, the printed count agrees **exactly with all six of the user's confirmed
+receipts**, which is the evidence the rule rests on. Deposits are matched on the
+word `DEPOSIT`, the same way the seeded categorisation rule matches them, because
+the wording is state-specific and the word is not.
+
+**Only a shortfall is reported, and it is reported as "at least".** Reading more
+lines than the receipt sold is real evidence of an invented line, but it is also
+what a misread count looks like, so that direction is left alone. And because the
+comparison is a net one — an invented line hides a missed one — the figure is a
+floor rather than an exact count. On the Costco photograph the flag says four,
+and six are genuinely absent.
+
+The count is stored on the receipt row rather than recomputed, so the flag
+survives a save: it is the receipt's own statement, not a field the reviewer
+edits, and clearing it the first time a draft is saved would be worse than not
+having it.
 
 A flagged receipt is not blocked: the reviewer can confirm it anyway (some
 receipts genuinely do not add up) and the flags stay attached as the record of
@@ -530,19 +838,29 @@ values, so "no tip line" is distinguishable from "a tip of zero".
 ## 4. Data model
 
 SQLite, `data\bookkeeping.db`, schema in `app/db.py`. **`PRAGMA user_version` is
-at 6**; migrations live in `_migrate` and each is written to be a no-op on a
+at 8**; migrations live in `_migrate` and each is written to be a no-op on a
 database that already has the change, so they are safe to re-run. v2 removed the
 `GREAT VALUE` rule (§11.18), v3 added the abbreviation rules the offline engine
-needs, v4 added the `product_name` cache, and v5 added the grocery vocabulary
-(§11.35). v4 has no migration body because both its pieces arrive through paths
-that run on every open (`CREATE TABLE IF NOT EXISTS`, and `_seed_settings`
-inserting any missing key). v3 and v5 share `_add_missing_rules`, which skips
-any pattern the user already has so a rule they deleted stays deleted.
+needs, v4 added the `product_name` cache, v5 added the grocery vocabulary
+(§11.35), v7 added `line_item.name_source` and the Costco nouns (§11.49),
+and v8 added `receipt.items_sold` (§3).
+v4 and v6 have no migration body because their pieces arrive through paths that
+run on every open (`CREATE TABLE IF NOT EXISTS`, and `_seed_settings` inserting
+any missing key). v3, v5 and v7 share `_add_missing_rules`, which skips any
+pattern the user already has so a rule they deleted stays deleted.
+
+**v7 was the first migration to add a column**, and v8 does the same, and why it needs a body at all is
+worth keeping: `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as
+it is, so the `name_source` line in `SCHEMA` only ever reaches a database
+created after this version. Without the explicit `ALTER TABLE`, every older set
+of books would keep a `line_item` with no such column and fail on the next scan.
+`_has_column` guards it, because `ADD COLUMN` raises rather than shrugging when
+the column is already there.
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
-| `receipt` | one row per receipt | status, image path + sha256, merchant (+ raw as printed), date, currency, subtotal/tax/tip/total in cents, payment method, header category, engine/model/confidence, `raw_text` + `raw_response` for audit, `review_flags` JSON, timing, tokens, `cost_usd`, `error` |
-| `line_item` | purchased lines | description (+ `raw_description` = the model's plain-English expansion), sku, quantity, unit price, amount, category, `category_source`, `is_discount`, `taxable` |
+| `receipt` | one row per receipt | status, image path + sha256, merchant (+ raw as printed), date, currency, subtotal/tax/tip/total in cents, payment method, `items_sold` (the count the receipt prints for itself), header category, engine/model/confidence, `raw_text` + `raw_response` for audit, `review_flags` JSON, timing, tokens, `cost_usd`, `error` |
+| `line_item` | purchased lines | description (+ `raw_description` = the plain-English expansion and `name_source` = what filled it: `barcode`, `shorthand`, `model`, or `notfound` for a barcode looked up and not found), sku, quantity, unit price, amount, category, `category_source`, `is_discount`, `taxable` |
 | `category` | expense categories | name (unique), colour chip, `is_builtin`, sort order |
 | `category_rule` | keyword rules | field (`description`/`merchant`), match type (`contains`/`regex`), pattern, category, priority (lower first), enabled |
 | `translation` | English name → Chinese | the machine translation cache; a `NULL` means the services were asked and had none |
@@ -579,12 +897,15 @@ app/pipeline.py         scan orchestration and engine fallback
 app/extract/            recognition engines behind one interface
     base.py             the Extractor contract + the Pydantic schema/prompt
     claude_vision.py    the vision model (primary)
+    rapid_ocr.py        RapidOCR: PP-OCR on ONNX Runtime (full build only)
     windows_ocr.py      Windows' own OCR + word-box row reconstruction
     tesseract_ocr.py    Tesseract, if the user installed it
     receipt_text.py     shared: receipt text → ExtractedReceipt
-app/lookup/             plain-English product names from a barcode (online)
+app/lookup/             readable product names, online and off
     upc.py              the check-digit repair a Walmart receipt needs
     product_names.py    Open Food Facts + UPCitemdb, paced and time-boxed
+    shorthand.py        till abbreviations expanded locally, for chains with no
+                        barcode to look up (Costco)
     translate.py        item names into Chinese, cached (Google, then MyMemory)
     __init__.py         the SQLite cache, and the entry point the pipeline calls
 app/i18n.py             interface language: English or Chinese
@@ -702,6 +1023,20 @@ did (§11.13).
 
 Double-click **`dist\Bookkeeping.exe`**. A window opens. To give it to someone
 else, send them **that one file**: no Python, no installer, no admin rights.
+
+**There are two builds, and which one to use is a real choice** (§3, and the
+build section below):
+
+| | `Bookkeeping.exe` | `BookkeepingFull.exe` |
+| --- | --- | --- |
+| size | 30.2 MB | 125.5 MB |
+| start-up | 3.5 s | 5.2 s |
+| offline reader | Windows OCR | RapidOCR, falling back to Windows OCR |
+| reads (of the confirmed lines) | 66 matched, 41 names exact | 81 matched, 74 names exact |
+
+The slim one is the portable promise: small enough to send or carry. The full
+one is the accurate one, and it is what to run on a machine you work at. They
+share a data folder format, so the same books open in either.
 
 - **Where the books go.** A `data` folder **beside the .exe** (database, receipt
   images, `bookkeeping.log`). Move the .exe and its `data` folder together and
@@ -849,15 +1184,38 @@ real photo:
 
 ```bash
 build.bat
+build.bat --full
 ```
 
-Installs PyInstaller if missing, regenerates `assets\icon.ico` if missing,
-**copies the previous `dist\Bookkeeping.exe` to `dist\Bookkeeping.previous.exe`**,
-then builds from `Bookkeeping.spec`. About 90 seconds. The backup copy matters:
-build output is not in Git, so if a new build is broken that file is the only way
-back.
+| command | produces | size | offline engine |
+| --- | --- | --- | --- |
+| `build.bat` | `dist\Bookkeeping.exe` | 30.2 MB | Windows OCR |
+| `build.bat --full` | `dist\BookkeepingFull.exe` | 125.5 MB | RapidOCR, then Windows OCR |
+
+Both come out of **one** `Bookkeeping.spec`, selected by the
+`BOOKKEEPING_FULL_BUILD` environment variable that `build.bat --full` sets. One
+spec rather than two, because two would drift and the comparison between the
+builds would stop meaning anything. `--full` also pip-installs `rapidocr` and
+`onnxruntime` if they are missing; the plain build neither installs nor bundles
+them.
+
+Each installs PyInstaller if missing, regenerates `assets\icon.ico` if missing,
+**copies the previous build of that kind to `*.previous.exe`**, then builds.
+About 90 seconds for the slim one, rather longer for the full. The backup copy
+matters: build output is not in Git, so if a new build is broken that file is
+the only way back.
 
 Things in the spec that must not be "tidied up":
+
+- **The slim build's `excludes` list is load-bearing, not tidiness.** It names
+  `rapidocr`, `onnxruntime`, `cv2`, `numpy` and the rest outright. Two gentler
+  ways of keeping them out were tried and neither works: PyInstaller follows an
+  ordinary import even inside a function body, *and* it resolves a literal
+  module name handed to `importlib.import_module`. Without the exclusions the
+  slim build comes out at 97 MB instead of 30 — `cv2.pyd` alone is 29 MB of it.
+- **`--workpath` per target.** PyInstaller names its cache after the spec file,
+  and both builds share one spec, so without this each build discards the
+  other's analysis and re-runs from scratch.
 
 - **`tkinter` must not be in `excludes`.** It was there while the interface was a
   web page; leaving it once the interface became a Tk window produces an .exe
@@ -879,6 +1237,7 @@ these rather than write them again.
 
 ```bash
 py tools\measure_accuracy.py                # is the READING still as good?
+py tools\measure_accuracy.py --engine windows   # ...and for the slim build's engine
 py tools\verify_exe.py                      # does the BUILD work?
 py tools\screenshot_pages.py --out shots    # what does it LOOK like?
 py tools\seed_demo.py --data-dir C:\temp\demo --with-image
@@ -898,12 +1257,62 @@ py tools\make_sample_receipt.py out.png     # a synthetic receipt image
   its tests run anywhere. `measure_accuracy.py` runs the real engine over
   `pictures\` and reports.
 
-  Three design decisions are load-bearing, and none should be undone casually:
+  **Which engine it measures (1.17.0).** `--engine auto`, the default, takes the
+  first installed of RapidOCR → Windows OCR → Tesseract, which is what the
+  application itself would pick. Until 1.17.0 the harness built a
+  `WindowsOcrExtractor` unconditionally, so from 1.16.0 onwards `--check` was
+  guarding an engine the full build had stopped using — silently, which is the
+  worst way for a gate to be wrong. Claude is excluded from `auto`, and the
+  deciding reason is not the money: its reading is not deterministic, so it
+  cannot back a regression baseline. Name it explicitly to see what it does.
+
+  Both engines, same seven photographs, same parser, one command each:
+
+  | | matched | missed | invented | names exact | unaccounted |
+  |---|---|---|---|---|---|
+  | `--engine windows` | 66 | 19 | 3 | 41/66 | $101.95 |
+  | `--engine rapid` | **81** | **4** | **0** | **74/81** | **$0.00** |
+
+  **All eight photographs, every one checked line by line by the user on
+  2026-09-09** and exported to truth by `tools/export_truth.py`. This is the
+  first time the whole corpus has carried a human transcription, and the first
+  to include a restaurant bill. `ALDI2` and `Walmart1` are read exactly — line
+  for line and name for name — and Walmart1 is the receipt this project started
+  on at 20 of 24.
+
+  **Every difference that remains, against what the user confirmed:**
+
+  | photograph | difference | cause |
+  | --- | --- | --- |
+  | `ALDI2`, `Walmart1` | none — exact, line for line and name for name | — |
+  | `ALDI1_new` | `Chill Beans` read as `Chili Beans` | recogniser — see below |
+  | `ALDI1_new` | `Green Onions` read as `Green Onionis` | recogniser |
+  | `ALDI1_new` | `24 ct Paper Bowl` read as `24ct Paper Bow1 356387` | parser: the next line's item number bleeds in, plus `l` read as `1` |
+  | `Walmart4` | `GV RY RD IC` read as `GVRY RD IC` | recogniser, lost space |
+  | `Walmart2` | `756809105667` read as `...660` | recogniser, one digit |
+  | `COSTCO1` | `RED ONIONS` read as `EEE 9218 RED ONIONS` | parser: `_LEADING_ITEM_NO` strips one flag letter, Costco printed three |
+  | `Walmart3` | `GINGER ROOT` read as `0.42 1b. @ 1.00 1b. / 3.62` | parser: the weighed-item continuation line taken as the description |
+  | `KFC1` | four combo components missed; subtotal blank | scope: they carry no price, and the receipt prints no subtotal |
+
+  **Five are the recogniser, three the parser, four one scope question.** No
+  amount is wrong anywhere, nothing is invented, and every receipt reconciles to
+  the cent.
+
+  **One of them is worth more than its score.** The user confirmed `Chill
+  Beans`, which is what Aldi prints; the model returned `Chili Beans`. It is not
+  misreading the ink, it is *correcting* it to the dictionary word — the same
+  instinct that earlier turned Aldi's `Jalpeno` into `Jalapeno`, where the paper
+  really did say `Jalapeno` and the older transcription was the thing at fault.
+  Harmless on a bag of beans. Worth remembering on a product code, where the
+  plausible correction is the dangerous one, and worth checking first if a name
+  ever comes back subtly wrong in a way no OCR error explains.
+
+  Four design decisions are load-bearing, and none should be undone casually:
 
   1. **Ground truth and the baseline are separate files and are never merged.**
      `tests/fixtures/receipts_truth.json` is what a human confirmed the paper
-     says, and measures *accuracy*. `tests/fixtures/accuracy_baseline.json` is
-     what this code produced on some day, and measures *regression*. A harness
+     says, and measures *accuracy*. `tests/fixtures/accuracy_baseline.<engine>.json`
+     is what this code produced on some day, and measures *regression*. A harness
      that promotes its own last output to truth reports a clean pass for ever
      while drifting arbitrarily far from the receipt.
   2. **Invented lines are scored, not just missing ones.** Two rejected changes
@@ -915,6 +1324,16 @@ py tools\make_sample_receipt.py out.png     # a synthetic receipt image
   3. **A truth record carries the SHA-256 of its photograph**, so it cannot
      silently be scored against a different image. That is not hypothetical:
      `ALDI1.jpg` was re-photographed as `ALDI1_new.jpg` during 1.9.x.
+  4. **One baseline per engine, and a cross-engine comparison is refused rather
+     than reported** (1.17.0). RapidOCR matches ten more lines per corpus than
+     Windows OCR, so scored against the other's baseline every metric moves —
+     a landslide improvement one way, a catastrophe the other, and neither is a
+     measurement of anything the code did. `--check` reads the `engine` key the
+     baseline records and declines outright when it does not match. Both files
+     are kept because both builds ship: the slim build has no RapidOCR at all,
+     so its gate has to guard Windows OCR. A baseline written before 1.17.0
+     carries no key and is read as `windows`, which is a record of fact — that
+     was the only engine the harness could run.
 
   The header truth distinguishes *verified absent* (the key is present with a
   value of `null` — Walmart1 is photographed with its top out of frame, so a
@@ -973,69 +1392,75 @@ when done, and check with
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `Bookkeeping.md` | this file | the whole documentation |
+| `Bookkeeping_record.md` | this file | the whole documentation |
 | `VERSION` | 1 | `1.12.1` |
-| `README.md` | 200 | the public landing page: what it is, the measured accuracy, and the honest network boundary |
+| `README.md` | 207 | the public landing page: what it is, the measured accuracy, and the honest network boundary |
 | `docs/screenshots/*.png` | 4 files | the README's images, from demo books via `--tight`; `receipts.png` has its Payment field blurred after capture (see the note in `.gitignore`) |
-| `requirements.txt` | 38 | pinned to the versions actually installed and tested |
+| `requirements.txt` | 54 | pinned to the versions actually installed and tested |
 | `bookkeeping.py` | 24 | the entry point PyInstaller freezes |
 | `run.bat` | 27 | run from source (development) |
-| `build.bat` | 47 | build `dist\Bookkeeping.exe`, keeping the previous one |
-| `Bookkeeping.spec` | 93 | PyInstaller build definition, with the reasoning inline |
+| `build.bat` | 72 | build `dist\Bookkeeping.exe`, keeping the previous one |
+| `Bookkeeping.spec` | 127 | PyInstaller build definition, with the reasoning inline |
 | `make_icon.py` | 128 | draws `assets/icon.ico` (a receipt with a torn edge) |
 | `assets/icon.ico` | — | 8 sizes, 16–256 px; generated but tracked, because the build needs it |
 | `.gitignore` / `.gitattributes` | 95 / 1 | `data/`, `dist/`, `build/`, `.venv/`, caches and **every plausible receipt format** ignored — not just `.jpg`/`.png` but `.heic`, `.heif`, `.jfif`, `.webp`, `.avif`, `.bmp`, `.tif`, `.tiff`, `.pdf` — with the four README screenshots re-included **by name, not by directory**; `* -text` |
 | `app/__init__.py` | 22 | package docstring / layout map |
-| `app/store.py` | 736 | the service layer: receipts, categories, rules, reports, CSV |
-| `app/ui/window.py` | 597 | the window: chrome, menus, navigation, poll loop, dialogs |
-| `app/ui/receipts.py` | 747 | receipt list and the review pane |
+| `app/store.py` | 777 | the service layer: receipts, categories, rules, reports, CSV |
+| `app/ui/window.py` | 669 | the window: chrome, menus, navigation, poll loop, dialogs |
+| `app/ui/receipts.py` | 820 | receipt list and the review pane |
 | `app/ui/reports.py` | 356 | tiles, hand-drawn canvas charts, merchant table |
 | `app/ui/theme.py` | 361 | four palettes, display scaling, ttk styling, shared widgets |
-| `app/ui/settings_page.py` | 351 | recognition settings |
+| `app/ui/settings_page.py` | 352 | recognition settings |
 | `app/ui/rules.py` | 241 | categories and keyword rules |
 | `app/ui/__init__.py` | 18 | the interface package's map |
-| `app/pipeline.py` | 371 | scan orchestration, thread pool, engine fallback |
-| `app/db.py` | 641 | schema, seed categories and rules, migrations, connections |
+| `app/pipeline.py` | 520 | scan orchestration, thread pool, engine fallback |
+| `app/db.py` | 710 | schema, seed categories and rules, migrations, connections |
 | `app/launcher.py` | 175 | data folder, logging, single-instance lock, error reporting |
 | `app/categorize.py` | 131 | the precedence chain and rule matching |
-| `app/validate.py` | 126 | arithmetic and sanity checks → review flags |
+| `app/validate.py` | 172 | arithmetic and sanity checks → review flags |
 | `app/paths.py` | 103 | frozen vs. source paths; writable data folder with fallback |
 | `app/money.py` | 66 | integer-cent money conversion |
 | `app/images.py` | 66 | image normalisation (EXIF, downscale, PNG) |
 | `app/settings_store.py` | 60 | settings read/write, secret masking |
-| `app/extract/receipt_text.py` | 525 | shared: receipt text → `ExtractedReceipt` |
-| `app/extract/windows_ocr.py` | 367 | Windows OCR engine + word-box row reconstruction |
+| `app/extract/receipt_text.py` | 947 | shared: receipt text → `ExtractedReceipt` |
+| `app/extract/rapid_ocr.py` | 325 | RapidOCR: better offline reading, full build only |
+| `app/extract/windows_ocr.py` | 404 | Windows OCR engine + word-box row reconstruction |
 | `app/extract/claude_vision.py` | 207 | Claude vision engine, pricing table, error mapping |
-| `app/extract/base.py` | 181 | `ExtractedReceipt` schema + `Extractor` interface |
+| `app/extract/base.py` | 189 | `ExtractedReceipt` schema + `Extractor` interface |
 | `app/extract/tesseract_ocr.py` | 112 | Tesseract engine (parser now shared) |
-| `app/extract/__init__.py` | 89 | engine registry and fallback order |
+| `app/extract/__init__.py` | 109 | engine registry and fallback order |
 | `app/lookup/product_names.py` | 282 | Open Food Facts + UPCitemdb, paced, time-boxed, failure-tolerant |
-| `app/lookup/__init__.py` | 132 | the barcode-name cache and the entry point the pipeline calls |
+| `app/lookup/__init__.py` | 135 | the barcode-name cache and the entry point the pipeline calls |
 | `app/lookup/upc.py` | 70 | UPC-A check digit; the repair a Walmart receipt needs |
-| `app/i18n.py` | 318 | interface language, the Chinese table, and the CJK font |
+| `app/i18n.py` | 323 | interface language, the Chinese table, and the CJK font |
 | `app/privacy.py` | 66 | masking the personal details a receipt carries — **display only** |
-| `app/lookup/translate.py` | 241 | item names into Chinese, cached; Google then MyMemory |
-| `tools/accuracy.py` | 237 | accuracy scoring: pure, no OCR, runs anywhere |
-| `tools/measure_accuracy.py` | 228 | runs the engine over `pictures\`, reports, guards regressions |
+| `app/lookup/shorthand.py` | 136 | till shorthand expanded offline; the only route that works at Costco |
+| `app/lookup/translate.py` | 277 | item names into Chinese, cached; Google then MyMemory |
+| `tools/accuracy.py` | 298 | accuracy scoring: pure, no OCR, runs anywhere |
+| `tools/measure_accuracy.py` | 323 | runs the chosen engine over `pictures\`, reports, guards regressions |
 | `tools/make_sample_receipt.py` | 121 | synthetic Walmart receipt with known values |
 | `tools/verify_exe.py` | 356 | drives the built .exe and checks it behaves (§7) |
 | `tools/seed_demo.py` | 139 | fills a set of books with plausible demo receipts |
 | `tools/mock_anthropic.py` | 135 | stand-in for the Messages API, for testing without a key |
 | `tools/screenshot_pages.py` | 145 | opens the window and screenshots every page; `--tight` clips to the client area, which is **mandatory** for anything published |
-| `tests/test_store.py` | 646 | the service layer, end to end with a stub engine |
-| `tests/test_ui.py` | 665 | builds the real window and drives it |
-| `tests/test_units.py` | 656 | money, validation, precedence, OCR-text parsing |
+| `tests/test_store.py` | 771 | the service layer, end to end with a stub engine |
+| `tests/test_ui.py` | 803 | builds the real window and drives it |
+| `tests/test_units.py` | 1196 | money, validation, precedence, OCR-text parsing |
 | `tests/test_real_receipt.py` | 291 | the one real receipt this project has been tested against |
 | `tests/test_claude_engine.py` | 265 | Claude engine against a local mock of the Messages API |
 | `tests/test_theme.py` | 160 | every palette's contrast and status-distinctness |
 | `tests/test_i18n.py` | 242 | the language switch, and machine translation of item names |
-| `tests/test_product_lookup.py` | 365 | barcode repair, both lookup sources, the cache, the rate-limit paths |
-| `tests/test_windows_ocr.py` | 215 | row reconstruction, amount repairs, the real reading |
+| `tests/test_product_lookup.py` | 539 | barcode repair, both lookup sources, the cache, the rate-limit paths |
+| `tests/test_rapid_ocr.py` | 261 | the RapidOCR engine: box conversion, the load-order trap, the real photograph |
+| `tests/test_shorthand.py` | 97 | till-shorthand expansion, and every abbreviation it refuses to guess |
+| `tests/test_windows_ocr.py` | 298 | row reconstruction, amount repairs, the real reading |
 | `tests/test_desktop.py` | 143 | data-folder fallback, the single-instance lock, arguments |
-| `tests/test_accuracy.py` | 253 | the harness itself: invented lines, multiplicity, the truth/baseline split |
+| `tests/test_accuracy.py` | 465 | the harness itself: invented lines, multiplicity, the truth/baseline split, engine matching |
 | `tests/conftest.py` | 55 | temp-directory database fixtures |
 | `tests/fixtures/receipts_truth.json` | 164 | ground truth: what a human confirmed each photograph says |
-| `tests/fixtures/accuracy_baseline.json` | 134 | the baseline: what the code produced, for regression only |
+| `tools/export_truth.py` | 174 | turns receipts confirmed in the app into ground truth, into a gitignored file |
+| `tests/fixtures/accuracy_baseline.rapid.json` | 141 | the RapidOCR baseline: what the code produced, for regression only |
+| `tests/fixtures/accuracy_baseline.windows.json` | 141 | the same for Windows OCR, which is all the slim build has |
 | `tests/fixtures/walmart_ocr_words.json` | — | the 161 words Windows OCR really returned for the real receipt |
 
 13 227 lines of Python across the 51 tracked `.py` files. Not in version control: `data/` (the user's books),
@@ -1048,7 +1473,7 @@ when done, and check with
 Verified on this machine (Windows 11, Python 3.13.11, 3840×2160 at 150 %),
 2026-08-23, again on 2026-08-29 for 1.3.0 and 1.4.0, and on 2026-08-31 for 1.5.0:
 
-**Automated — 344 tests pass** (`pytest tests/ -q`, ~70 s):
+**Automated — 447 tests pass** (`pytest tests/ -q`, ~92 s):
 
 - The **service layer** end to end against a stub engine with a known reading:
   schema validation, rule and model categorisation, arithmetic flags, storage,
@@ -1365,28 +1790,161 @@ are not guessable from the printed text alone.
   services from this address. They are almost certainly conservative on a
   different connection and possibly still optimistic on a throttled one.
 
+### How the three chains differ, measured against a human-confirmed reading (1.13.0)
+
+**Where these numbers come from, and why they are better than the ones above.**
+In September 2026 the user went through all six receipts in the application by
+hand, corrected every field and line, and confirmed each one. That makes the
+books themselves a ground truth for those six photographs — established by
+somebody holding the paper, not by a second model reading the same image — and
+this table is the current engine scored against it. **This is now wired into the
+harness** — `tools/export_truth.py` (1.15.0) writes those confirmations out as a
+gitignored truth file, so `measure_accuracy.py` scores six of the seven
+photographs against a transcription rather than against itself. The tracked
+`tests/fixtures/receipts_truth.json` still holds only Walmart1, which is
+deliberate and explained in §12a: aggregate figures may live in git, an itemised
+list of one person's shopping may not.
+
+Both columns of numbers are the same engine against the same confirmed books:
+**before** is what the comparison found, **after** is the same measurement once
+the four defects below were fixed in 1.13.1.
+
+| photograph | header right (before → after) | amounts matched | missed | invented (before → after) | names exact (before → after) |
+| --- | --- | --- | --- | --- | --- |
+| `Walmart1.jpg` | 3/5 → 3/5, and the other two are correct as absences (the top is out of frame) | 23/24 | 1 | 0 | 22/24 |
+| `Walmart2.jpg` | 4/5 → **5/5** | 3/3 | 0 | 0 | 2/3 |
+| `Walmart3.jpg` | 5/5 | 8/9 | 1 | 0 | 8/9 |
+| `ALDI1_new.jpg` | 5/5 | 17/18 | 1 | 0 | 3/18 |
+| `ALDI2.jpg` | 4/5 | 7/7 | 0 | 0 | 6/7 |
+| `COSTCO1.jpg` | 3/5 → **5/5** | 10/16 | 6 | 3 → **2** | 0/16 → **5/16** |
+
+Nothing in the Aldi or Walmart3 rows moved, which is the point of showing them:
+the Costco work did not disturb the chains that already read correctly.
+
+**The single most useful thing in that table is that names and amounts fail
+independently, and by chain.** Aldi returns every amount and almost no name;
+Walmart returns both; Costco returns neither reliably. Anything built on top of
+an item name must assume Aldi's 3-in-18, not Walmart's 22-in-24.
+
+#### The line layout, which is where Costco actually breaks
+
+`0/16` names looks like total failure and is not. Eight of the ten Costco lines
+that were read came back as **the correct text with a left-hand column glued to
+the front** — the confirmed name preceded by a single letter and the item
+number. Costco prints a one-letter code in a column to the *left* of the item
+number, and the parser has never seen that:
+
+```
+Walmart   NAME .......... 012345678901   12.34 X      flag on the right
+Aldi      NAME .......... 123456          12.34       flag on the right
+Costco    E  1234567  NAME ........       12.34 F     flag on the LEFT
+```
+
+Because the line does not begin with the item number, the sku is not split off
+either, so the number ends up inside the description and every name scores as
+wrong. **This is one structural fix, not eight name fixes**, and it is the first
+thing to do for Costco. It is also the pattern to look for at any new chain: find
+out which side the tax flag is printed on before assuming a line begins with its
+item number.
+
+Only four Costco names are genuinely mangled beyond that, and they are ordinary
+character confusion of the kind Aldi produces too.
+
+#### The summary block: three chains, three vocabularies
+
+| chain | subtotal | total | how the amount sits |
+| --- | --- | --- | --- |
+| Walmart | `SUBTOTAL` | `TOTAL`, and on the card slip **`TOTAL PURCHASE` with the amount printed first** — `24.81 TOTAL PURCHASE` | usually right of the label, sometimes left |
+| Aldi | `SUBTOTAL` | **no `TOTAL` at all** — `AMOUNT DUE` | right of the label |
+| Costco | `SUBTOTAL` | `**** TOTAL` | right of the label |
+
+`Walmart2.jpg` reported no total because of the second row of that table: its
+`TOTAL` line came back as `TOT AL 24 . a-I` and the only legible statement left
+was `24.81 TOTAL PURCHASE`, which the parser could not use because it looked for
+the amount at the end of the line. Fixed in 1.13.1.
+
+**`ALDI2.jpg` is not the same problem, and the first version of this note said
+it was.** `AMOUNT DUE` has been in the vocabulary all along and works on
+`ALDI1_new.jpg`, which prints `AMOUNT DUE 65.32` on one row. On ALDI2 the till
+put the amount on the row below, *and* OCR lost the decimal point from it: both
+passes return `$ 17 - 43`. So there is no amount there to read, at either scale,
+and a lookahead to the next row would find nothing. Repairing ` - ` into a
+decimal point was considered and rejected — the existing amount repairs are all
+gated on the `.dd` of a price (§11.21) and this one could not be, so it would be
+the first repair in the file able to fire on arbitrary text. **ALDI2's total is
+an OCR limit, not a parser bug**, and it stays unfixed.
+
+A fourth chain should still be assumed to have a fourth vocabulary.
+
+#### Two defects this comparison found (both fixed in 1.13.1)
+
+1. **The Costco tax is read one cent high, and the receipt itself says so.**
+   The summary line comes back as `TAX 5.16` where the paper reads `5.15` — a
+   plain digit misread. What makes it worth fixing rather than shrugging at is
+   that the same reading contains the correct value three times over: the two
+   rate components are read exactly (`A 5.500% TAX 2.86`, `F 8.00% TAX 2.29`,
+   summing to 5.15), the `TOTAL TAX 5.15` line is read exactly, and
+   subtotal + 5.15 = the total that was also read exactly. The parser takes the
+   first, wrong one and never revisits it.
+
+   **This is §12a item 2, no longer latent.** That entry describes a bare
+   `TAX 0.00` arriving before the rate lines and blocking the rate sum from ever
+   being written. The mechanism here is identical with a non-zero value, and the
+   consequence is visible in the user's own confirmed books: they reconcile to
+   the cent on all five other receipts and are one cent out on this one.
+
+   Fixed by `_settle_tax`, which does not prefer either reading on principle —
+   it asks which of them makes the receipt's own arithmetic add up, and only
+   acts when subtotal, total and a breakdown are all present and the two
+   candidates actually differ. **A consequence for the books already on disk:**
+   receipt #18 was confirmed with the wrong `5.16` and will not reconcile until
+   it is re-scanned or the field is corrected by hand. The application will not
+   change a confirmed figure underneath its owner.
+
+2. **A date typed without a leading zero sorts wrongly.** The Walmart1 header is
+   out of frame, so its date was entered by hand as `2026-8-18` rather than
+   `2026-08-18`. Dates are stored and sorted as text, so that row sorts above
+   `2026-09-06` — it appears at the top of the Receipts list as though it were
+   the newest. The review pane labels the box `YYYY-MM-DD` and then accepts
+   anything.
+
+   Fixed in `store.normalise_date`, which pads a date already of that shape and
+   leaves everything else exactly as typed. Deliberately not a validator: the
+   field belongs to the reviewer, and a value the code cannot parse is better
+   shown back to them unchanged than silently reinterpreted.
+
+#### Notes on reading this comparison
+
+- **`ALDI` against `Aldi` is not an error.** The user typed the name as printed;
+  the parser returns the canonical spelling from `_KNOWN_MERCHANTS`. The strict
+  string comparison counts it as a header miss, which is why Aldi shows 5/5 in
+  one row and the merchant is worth discounting in the other.
+- **Walmart1 having no merchant and no date is the correct answer**, not a
+  failure, and §11 records the fix that made it so. It is counted as 3/5 above
+  because the user has since filled both in by hand.
+- The photographs and the confirmed line items stay out of git. Only the counts
+  and the layout facts are recorded here.
+
 ### Where to pick up
 
-The state as of 1.9.5, for whoever reads this next:
+The state as of 1.17.0, for whoever reads this next:
 
 - **The application works with nothing configured**, which is the single most
   important fact here. Before 1.3.0 a fresh copy could not read a receipt at all
   without an API key or a Tesseract install, and the first real receipt it was
   ever given failed with four red flags and no data. Windows' own OCR now covers
   that case on any Windows 10/11 machine.
-- **Everything is committed. Nothing since 1.4.0 is pushed or tagged.** Thirteen
-  commits sit on `main` locally, `e0235a5` (1.4.1) through `51a3560` (1.9.4);
-  both `origin` (the private GitHub repository) and `mirror` are still at
-  `1437d53`. `dist\Bookkeeping.exe` is built from `51a3560` and passes
-  `tools\verify_exe.py`.
+- **1.12.0 through 1.17.0 are neither pushed nor tagged.** `origin` (now a
+  public GitHub repository) and `mirror` both sit at `005a59a` (1.11.7), and
+  tags stop at `v1.11.7`. Pushing needs one clean round of safety-engineer and
+  quality-engineer, then the nine tags.
 
-  The quality gate blocked the push twice, correctly both times, and each block
-  found something a test run could not: a comment that stated a false reason
-  (§11.44), and behind it a real defect that silently dropped a purchased line.
-  Both are fixed. **A third review round was started and then stopped at the
-  user's request**, so the gate is simply un-run at the current digest rather
-  than failing — there is no known-outstanding finding. Pushing needs one clean
-  round of safety-engineer and quality-engineer, then the thirteen tags.
+  The quality gate has blocked this project's pushes twice, correctly both
+  times, and each block found something a test run could not: a comment that
+  stated a false reason (§11.44), and behind it a real defect that silently
+  dropped a purchased line. Both are long fixed. The gate is simply un-run at
+  the current digest rather than failing — there is no known-outstanding
+  finding.
 - **The direction of travel is online, by the user's decision (August 2026):**
   "my ultimate goal for this software is for it to operate online, as internet
   connectivity is required to query certain information and provide accurate
@@ -1402,31 +1960,43 @@ The state as of 1.9.5, for whoever reads this next:
   key ever appears, the comparison to run is against the fixture in
   `tests/test_real_receipt.py` (merchant `null`, date `null`, subtotal 141.94,
   tax 7.50, total 149.44, 24 lines).
-- **The one genuinely open verification: a receipt that is not a supermarket.**
-  Five real receipts have now been through the whole pipeline as image files
-  (section 9), across three chains, and every single one found a defect its
-  predecessors could not -- 11.29 through 11.34 all came from that. Aldi alone
-  found five, and one of them made a whole receipt read as zero items.
+- **A receipt that is not a supermarket: asked for, and it paid off exactly as
+  predicted.** This entry stood open for weeks saying a restaurant bill would
+  break the parser's assumptions and would find something. In 1.17.1 the user
+  supplied one -- a KFC/TB carry-out ticket -- and it did, twice over:
 
-  Both chains are still grocery tills printing the same broad shape: a
-  description, an item number, a right-aligned price, a tax flag. **A restaurant
-  bill or a fuel receipt breaks that shape** -- amounts printed above the item,
-  no item numbers at all, per-person subtotals, a tip line, litres at a price
-  per litre. That is the next thing worth asking the user for, and on the
-  evidence so far it will find something.
+  - It prints **no line saying TOTAL at all**. The amount charged sits against
+    `CARRY OUT`, with the tax *above* it rather than below, and no subtotal line
+    anywhere. The receipt read with no total (§11.71).
+  - It prints **`Cashier: Zackariah`** near the top, which matched `CASH` and
+    exposed a defect that had been silently mis-recording three of the other
+    receipts as cash purchases all along (§11.70).
 
-  The photographs live in `pictures\` as `Walmart1.jpg`, `Walmart2.jpg`, `Walmart3.jpg`, `ALDI1.jpg`,
-  `ALDI1_new.jpg` and `ALDI2.jpg` and
-  are gitignored, deliberately: a receipt is somebody's shopping and their
-  payment method. Do not commit them, and do not paste their card or reference
-  numbers into anything.
+  It also prints four combo components with no price under one priced line, and
+  the app records none of them although the user's own verification does -- the
+  one scope question still outstanding from that receipt.
+
+  **The prediction generalises, so keep the entry alive in a narrower form.**
+  Every new *shape* of receipt has found a defect its predecessors could not,
+  without exception, across four chains now. Still untried: **a fuel receipt**
+  (litres at a price per litre), a sit-down bill with a **tip line** and
+  per-person subtotals, something faded or folded, and anything **not in USD** --
+  every amount pattern in `receipt_text` assumes a `.` decimal separator.
+
+  The photographs live in `pictures\` as `Walmart1.jpg` through `Walmart4.jpg`,
+  `ALDI1_new.jpg`, `ALDI2.jpg`, `COSTCO1.jpg` and `KFC1.jpg`, and are
+  gitignored, deliberately: a receipt is somebody's shopping and their payment
+  method. Do not commit them, and do not paste their card or reference numbers
+  into anything. (`ALDI1.jpg` was deleted by the user in 1.17.1; the file the
+  older tables call `ALDI1.jpg` is not on disk, and `ALDI1_new.jpg` is the
+  re-photograph that replaced it.)
 - **The known weaknesses**, if you are deciding what to build:
   1. **The barcode lookup is Walmart-shaped.** It resolves at best 12 of 20
-     Walmart lines, and **0 of 18 at Aldi** -- Aldi prints six-digit internal
-     article numbers, not barcodes, and no public database knows them. That is
-     not a defect to fix: Aldi already prints readable names, so there is
-     nothing to expand. But do not describe the feature as though it works
-     everywhere.
+     Walmart lines, **0 of 18 at Aldi** and **0 of 16 at Costco** -- both print
+     their own internal article numbers, not barcodes, and no public database
+     knows them. Aldi needs no fix, because it already prints readable names.
+     Costco does not, which is what `app/lookup/shorthand.py` exists for. Do not
+     describe the barcode feature as though it works everywhere.
   2. **A misread barcode digit yields a confidently wrong name** and cannot be
      detected (§11.31).
   3. **Item names survive a bad photograph far worse than amounts do** -- 3 of
@@ -1442,7 +2012,9 @@ The state as of 1.9.5, for whoever reads this next:
   the amount repairs in `windows_ocr.py` fire outside the amount column (§11.21),
   add a theme without re-running the two colour checks (§11.26 —
   `tests/test_theme.py` runs them for you), parallelise the product lookups
-  (§11.27), or scrape walmart.com (§3 — it answers a bot check, not a product).
+  (§11.27), scrape walmart.com (§3 — it answers a bot check, not a product), or
+  scrape costco.com (§3 — measured, and it answers 403 on search and on every
+  product page).
 - **Editing this file:** it contains U+202F narrow no-break spaces inside figures
   such as "150 %", which silently defeat exact-string edits. Match on lines that
   do not contain them, or patch by line number.
@@ -2036,6 +2608,358 @@ The state as of 1.9.5, for whoever reads this next:
     class of finding the quality gate exists to catch, since nothing about it
     shows up in a test run (`app/extract/windows_ocr.py`,
     `app/extract/receipt_text.py`).
+48. **A merchant the OCR misreads costs far more than one field.** The Costco
+    receipt reported its merchant as `455 Scarborough Downs Rd`, the street
+    address printed under the unreadable logo. That is not just a wrong box:
+    the merchant gates the chain-specific half of the shorthand expander *and*
+    the merchant categorisation rule, so 8 of the receipt's 15 distinct lines
+    sat in `Uncategorized` as a consequence. Fixed with the three-pass match in
+    §3, and — separately — in the merge between the two OCR passes, which filled
+    a field from the second reading only when the first had left it blank. The
+    merchant is never blank, because the fallback supplies the address, so the
+    merge was discarding a recognised `Costco` in favour of a guess. A named
+    shop now wins over a guess whichever pass found it
+    (`app/extract/receipt_text.py`, `app/extract/windows_ocr.py`).
+49. **A locally expanded name must not claim it came from a barcode.** The
+    review pane labelled every expansion `from barcode:`, which was already
+    untrue of names the vision model supplied and would have become untrue of
+    every Costco line. The three differ in how much they can be trusted — a
+    barcode name is only as good as the digits OCR read off a photograph, while
+    a shorthand expansion cannot be wrong about *which* product it is — so the
+    label is the reviewer's cue for how hard to look. `line_item.name_source`
+    records which, rather than the pane inferring it
+    (`app/db.py`, `app/pipeline.py`, `app/store.py`, `app/ui/receipts.py`).
+50. **A lookup failure must not also skip the offline expansion.**
+    `_expand_item_names` returned early when `names_for_skus` raised, which was
+    right when a barcode was the only source. The shorthand pass never touches
+    the network, so it still has something to offer on exactly the machine where
+    the lookup could not run — the early return is now a caught exception and an
+    empty result (`app/pipeline.py`).
+
+51. **A per-line flag column can be printed on the left.** Walmart and Aldi
+    both put their tax flag after the price, so a line had never begun with
+    anything but its item number. Costco prints a single letter in the left
+    margin, and the whole of `E 96716 ORG SPINACH` therefore stayed in the
+    description — flag, item number and all. It is one fault, not the fifteen
+    wrong names it looked like: with the column recognised, the same photograph
+    went from 0 of 16 names exact to 5, and the rest are ordinary character
+    misreads. The letter is dropped rather than interpreted, because nothing on
+    the receipt says what Costco means by it (`app/extract/receipt_text.py`).
+52. **`SUBTOTAL` read as `SUBT TAL` became the receipt's largest purchase.** OCR
+    split the word at the O. It matched neither the literal nor the letter-spaced
+    form, so the line was not treated as summary at all and its amount — the
+    subtotal itself — was booked as an item. Recognised now by comparing the
+    leading run of letters against `SUBTOTAL` within one edit, the same budget
+    used for a misread shop logo, and the same helper
+    (`app/extract/receipt_text.py`).
+53. **A stated tax and a rate breakdown that disagree are settled by the
+    receipt's own arithmetic.** `TAX 5.16` was read where the paper says 5.15,
+    while the two rate components were read exactly and sum to 5.15. The old
+    rule — a stated line beats the breakdown — took the misread digit and never
+    revisited it. `_settle_tax` prefers neither: it takes whichever candidate
+    satisfies subtotal + tax = total, and does nothing at all unless all three
+    are present and the two candidates differ. **This is the bug recorded as
+    §12a item 2**, which described the same mechanism with a bare `TAX 0.00` and
+    called it latent; it was not latent, it was costing a cent on every scan of
+    this receipt (`app/extract/receipt_text.py`).
+54. **A total printed before its own label was invisible.** Walmart's card slip
+    states `24.81 TOTAL PURCHASE`, and on one photograph that is the only
+    legible statement of the total — the `TOTAL` line itself came back as
+    `TOT AL 24 . a-I`. The parser looked for the amount at the end of the line
+    only. A leading amount is now accepted, but exclusively on a line that
+    already names a summary field, so an item priced before its name is not
+    swept up as the total (`app/extract/receipt_text.py`).
+55. **A hand-typed date without a leading zero sorted as the newest receipt.**
+    Dates are stored and compared as text, so `2026-8-18` sits above
+    `2026-09-06`. `store.normalise_date` pads a date already of that shape and
+    passes anything else through untouched (`app/store.py`).
+
+56. **A remembered window position was checked for its corner, not its size.**
+    `_geometry_is_on_screen` asked whether the top-left of a saved geometry
+    landed somewhere visible and said nothing about the rest of the window, so
+    `2461x1733+421+1034` passed: the corner is on screen, and everything below
+    it is not. The window opened with most of itself, including the row of
+    buttons that saves a receipt, off the bottom of the display.
+
+    Replaced by `fit_to_screen`, which **clamps rather than accepts or
+    rejects** — rejecting threw away the size the user had chosen and reverted
+    to the default, where clamping keeps their size wherever it fits and
+    corrects only what does not. It matters more here than in most applications
+    because this one is meant to be copied onto a USB stick: the books travel
+    with the program and `window_geometry` travels inside them, so a geometry
+    saved on a 4K desktop arrives on a laptop that cannot show it.
+
+    Clamping to `winfo_screenheight` was not enough on its own, and the first
+    attempt at this fix proved it: that figure counts the taskbar's pixels as
+    available, so the window came back on screen and sat with its last 75 rows
+    behind the taskbar. `usable_screen` asks Windows for the real work area
+    through `SPI_GETWORKAREA` — 3840×2088 against a reported 3840×2160 on this
+    machine, a 72-pixel taskbar — and falls back to a fraction of the screen
+    when the call is unavailable (`app/ui/window.py`).
+
+57. **Real card and transaction identifiers were in tracked test files, and
+    had already been pushed.** Found by auditing before deciding item 1 of §12a
+    rather than by anybody reporting it. `tests/test_units.py` carried a
+    transcribed Walmart receipt complete with its transaction certificate
+    (`TC# …`), its reference number (`REF # …`) and the last four digits of the
+    card that paid, all present at `origin/main`. Nothing in those tests needed
+    the real values: what is being tested is that a line of that *shape* reads
+    as summary rather than as a purchase, so they are now zeros, with a comment
+    saying they must stay invented.
+
+    Worth noting how it happened, because it was not carelessness about
+    security -- it was a transcription made to test the parser honestly, by
+    someone thinking about parsing. The masking feature (§11.44) and the whole
+    `pictures/` policy were already in place; neither covers a value typed into
+    a test file by hand. **The residue is still in the published history**, and
+    removing it means a force-push, which is the user's call rather than
+    something to do quietly (`tests/test_units.py`).
+58. **A placeholder in the truth file was mistaken for evidence.** Five of the
+    six entries in `receipts_truth.json` name a photograph and assert nothing
+    about it -- they exist so the harness can say "nothing verified yet" rather
+    than "no record", which are different things. The first cut of
+    `export_truth.py` treated any existing entry as coverage and so exported
+    one receipt out of six, silently. `Truth.says_anything` is the distinction,
+    and both the exporter and `load_truth` use it (`tools/accuracy.py`,
+    `tools/export_truth.py`).
+59. **The merchant was scored letter by letter.** A reviewer types the shop as
+    the sign prints it, `ALDI`; the parser returns the canonical `Aldi`. Both
+    name the same shop, and comparing them exactly held two receipts at 4/5 for
+    ever -- a column that can never reach full marks is one a reader learns to
+    ignore. Compared through `normalise_name` now, the same way item names
+    already were (`tools/accuracy.py`).
+
+60. **Nothing ever looked at a line the reviewer typed.** Expansion and
+    translation ran during a scan and nowhere else, so a line added or renamed
+    in the review pane was never offered a product name or a translation --
+    for the life of the receipt. Reported as the application ignoring what had
+    been entered, which is a fair reading of the evidence. `enrich_now` now
+    runs both passes over the stored rows after every save
+    (`app/pipeline.py`, `app/ui/receipts.py`).
+61. **A question that came back empty looked identical to one never asked.**
+    Both render as a line with nothing under it. `name_source = 'notfound'` and
+    a `NULL` zh in the translation cache are the two records that tell them
+    apart, and `lookup.cached_state` exposes the second, which `chinese_for`
+    had always hidden by returning hits only (`app/lookup/translate.py`,
+    `app/ui/receipts.py`).
+62. **A lookup that could not run must not be recorded as a lookup that found
+    nothing.** The first version of §11.60 marked `notfound` whenever a
+    resolvable barcode produced no name -- including when `names_for_skus` had
+    thrown, which says nothing whatever about the catalogue. It would have told
+    the reviewer "no product name found" because their network was down, and
+    cached that judgement against the line so no later save retried it. Caught
+    by `test_a_lookup_failure_never_breaks_a_scan`, which is worth noting: the
+    test predates the bug and failed for the right reason (`app/pipeline.py`).
+
+63. **Initialising WinRT stops onnxruntime from loading, for the rest of the
+    process.** Build a `WindowsOcrExtractor` and then a `RapidOcrExtractor` and
+    the second raises *"DLL load failed while importing
+    onnxruntime_pybind11_state"* every time; reverse them and both work. WinRT
+    initialises the thread's COM apartment and onnxruntime's extension module
+    will not initialise underneath it. `engine_status` asks every engine about
+    itself at start-up, so the bad order was the *normal* one. Fixed by loading
+    onnxruntime at import of `rapid_ocr`, which `app.extract` imports before
+    anything reaches WinRT. Found by a test that passed alone and failed in its
+    own file (`app/extract/rapid_ocr.py`).
+64. **Asking whether RapidOCR is available must not load RapidOCR.** The other
+    engines build themselves in `available()` because it is instant; this one
+    loads three ONNX models. `available()` runs on every Settings draw and every
+    start-up, and building there took the suite from 90 seconds to 377. It is an
+    import check now (`app/extract/rapid_ocr.py`).
+65. **Two ways of hiding an import from PyInstaller, neither of which works.**
+    The slim build is supposed to contain no RapidOCR at all and came out at
+    97 MB instead of 30 -- cv2 alone was 29 MB. PyInstaller follows an ordinary
+    import inside a function body, and it also resolves a literal module name
+    passed to `importlib.import_module`. The exclusions are named outright in
+    the spec now, which is where a decision about what a build contains belongs
+    (`Bookkeeping.spec`).
+66. **One spec, two builds, one work folder.** PyInstaller names its cache after
+    the spec file, so the slim and full builds overwrote each other's analysis
+    and each re-ran from scratch. `build.bat` passes `--workpath` per target
+    (`build.bat`).
+67. **The harness measured an engine the application had stopped using.**
+    `measure_accuracy.py` built a `WindowsOcrExtractor` unconditionally, so from
+    1.16.0 the `--check` gate guarded the slim build's reader while the full
+    build ran RapidOCR — and said nothing about it. It now takes `--engine`,
+    defaulting to the first installed of RapidOCR → Windows OCR → Tesseract, and
+    keeps one baseline per engine. Two things found while fixing it, both now
+    pinned by tests: `build_engines` answers an unrecognised name with the whole
+    fallback list, so taking its first entry would have run **Claude** in
+    response to a typo; and resolving the engine before looking for photographs
+    turned a fresh clone's "none found" into "no engine available", which is the
+    less true of the two answers (`tools/measure_accuracy.py`).
+68. **A capital O and a zero are the same ink, and no model can fix that.** The
+    largest single defect left after RapidOCR landed: five of the fourteen wrong
+    item names were this one confusion — `PR0TEINSUPPL`, `GVC0RNSTARCH`,
+    `DOVE BW 110Z`, `AIM TP 5.50Z`, `EQJELLUBE80Z`. It is worth knowing *why the
+    obvious fix is the wrong one*: a larger recogniser meets exactly the same
+    ambiguous glyph, so this was never going to be bought with model size. Two
+    narrow rules break the tie on what the token is instead — a zero inside an
+    otherwise all-capital word is an O, and `0Z` after a digit is the unit `OZ`.
+    Both refuse anything carrying a digit other than zero, which is what exempts
+    barcodes, item numbers and codes like `WD40`; the asymmetry is deliberate,
+    since a missed repair leaves a name a reviewer can see is wrong while a
+    wrong one invents a plausible name nobody will question. Names exact went
+    59 → 64 of 73, with Walmart1 reaching 23 of 23. One existing test recorded
+    the misreading as expected output and was corrected — the fixture beneath it
+    is untouched, so it is still exactly what OCR returned
+    (`app/extract/receipt_text.py`, `tests/test_windows_ocr.py`).
+69. **A photograph is never quite square, and on a receipt that separates the
+    columns.** Three item names on ALDI1_new carried the flag letters of the
+    line below (`FP Chicken Drums` read as part of `Blk Angs Stew Meat`), one
+    line was lost, and Costco's `ORG SPINACH` was missing entirely. None of it
+    was recognition: the page is tilted by 1.5°, the columns sit 800px apart, so
+    the left-hand column of a line drifts 31px against a row pitch of 51 and
+    lands nearer the row above. `group_rows` now takes a `skew` and groups along
+    that baseline.
+
+    **Where the angle comes from is the whole story.** Two estimators were
+    written and both failed, for a reason worth recording: a receipt is a table
+    with evenly spaced columns, so a shear that slides one column onto the row
+    *below* projects just as sharply as the true angle, and a search for the
+    "clearest" projection walks straight into that resonance — it returned
+    −0.080 for three different receipts, pinned at the edge of its own search
+    range. Fitting slopes inside grouped rows failed differently: the rows it
+    had to learn from were the mis-grouped ones.
+
+    The angle needed no estimating at all. RapidOCR's detector returns a
+    **rotated quadrilateral** per line and `_as_words` was flattening it to a
+    bounding box and discarding the tilt. Taking the median of those polygon
+    angles gives +0.0254 for ALDI1_new — inside the 0.02–0.05 plateau that fixes
+    every affected row — and exactly 0.0 for the four photographs that are
+    square. Windows OCR and Tesseract report no angle and pass no skew, so they
+    are untouched, which their own baseline confirms.
+
+    Effect across the seven photographs: 73 → **75** lines matched, 4 → **2**
+    missed, still none invented, 64 → **68** names exact, and money unaccounted
+    **$14.87 → $0.95**. Costco and ALDI1_new now reconcile to the cent
+    (`app/extract/windows_ocr.py`, `app/extract/rapid_ocr.py`).
+70. **Three receipts recorded a card purchase as cash, and had done all along.**
+    Surfaced by the first KFC receipt, which prints **`Cashier: Zackariah`** near
+    the top. `_find_payment` was the one place that never got the whole-word
+    treatment of §11.9.4, so `CASHIER` matched `CASH`, and because the function
+    returns on its first hit it never reached `Card Type: Mastercard` at the
+    bottom. Aldi's `Your cashier today was Ismail` did the same. **A confidently
+    wrong value is worse than a blank one**: nothing in the books contradicts
+    "CASH", so nobody would ever have questioned it. Now matched with
+    `_whole_words`, and ALDI, ALDI2 and KFC1 all report the card.
+
+    The same audit found a second wrong value in the same function. The last
+    four digits were taken from `(\d{4})\s*$` -- the end of the line, whatever
+    was there -- so a line shaped `MASTERCARD- 0000 I 1 APPR#009999` reported the
+    card as **ending 9999, which is the approval code**. (Invented digits: the
+    real ones are exactly what §11.57 is about, and writing them into this row
+    while describing their removal is a mistake this session actually made and
+    caught on the pre-push scan.) Only digits sitting against the
+    brand are trusted now, bridged across whatever the terminal masks with, and
+    a line with nothing there yields a brand and no number rather than a guess.
+    Both Walmart receipts now report the right four digits.
+
+    First-match-wins was deliberately kept rather than preferring a brand over a
+    generic word, so KFC reports `CREDIT` from `ETender Credit` although
+    `Mastercard` is printed below it -- less specific, but true. Preferring the
+    brand would read the wrong answer off any receipt whose footer advertises
+    the cards a shop accepts (`app/extract/receipt_text.py`).
+71. **Fast food names the total after the counter, not after the word TOTAL.**
+    KFC1 has no line saying TOTAL anywhere: the amount charged sits against
+    **`CARRY OUT $12.84`**, with the tax printed *above* it instead of below,
+    and no subtotal line at all. The receipt read with no total and was flagged
+    for hand entry. `CARRY OUT`, `TAKE OUT`, `DINE IN` and `DRIVE THRU` are now
+    total labels -- **anchored to the start of the line and requiring the amount
+    to follow the words immediately**, which is the whole safety of the rule: a
+    bag charged as `CARRY OUT BAG 0.10` keeps a word in between and stays a
+    purchase. Matching loosely would let a ten-cent bag overwrite the total.
+
+    `TO GO` is deliberately absent: two of the commonest short words in English,
+    and it survives the space-stripped comparison as `TOGO`. Only `CARRY OUT` is
+    confirmed against a photograph; the siblings are the same label in the same
+    slot and are unverified. KFC1 now reads 11.89 + 0.95 = 12.84 and validates
+    clean (`app/extract/receipt_text.py`).
+72. **A zero in the tax-flag column, and what the older engine knew.** Walmart
+    flags a non-taxable line with the letter `O`, and RapidOCR ran it into the
+    amount: `0.05 O` arrived as **`0.050`**, which is not a two-decimal amount,
+    so the whole line was discarded and its money with it. Three receipts lost a
+    bottle deposit that way -- the last money unaccounted for anywhere.
+
+    **The user pointed out that the previous model handled this correctly, and
+    that is what identified the cause.** Windows OCR returns one box per *word*,
+    so `0.05` and `O` are separate detections and `rows_to_text` rebuilds the
+    space from their geometry -- it produced `0.05 O` on all eleven deposit
+    lines across three receipts, every time. RapidOCR returns one box per
+    *line*, so the space survives only if the recogniser chose to emit it, and
+    on the first deposit line of each receipt it does not. Nothing downstream
+    can recover a gap that was never in the string, so the parser now accepts a
+    lone `0` in the flag column and reads it as the letter.
+
+    Narrow on purpose: **only `0`**, never another digit, so `123.456` is still
+    not an amount carrying a flag, and the two-letter rule that keeps `0.02lb`
+    out is untouched. `_tax_flag` translates the zero before the lookup --
+    without that the flag reads as unknown rather than non-taxable, which loses
+    the only statement the receipt made about it.
+
+    Effect: **$0.00 unaccounted across all eight photographs**, Walmart1 at 24
+    of 24 names, and for the first time every line of every transcribed receipt
+    is read with none invented (`app/extract/receipt_text.py`).
+73. **A confidence cap that promised the opposite of what it did.** Found by the
+    pre-push comment review, and it was a behavioural defect rather than a wrong
+    comment. `rapid_ocr.MAX_CONFIDENCE` was 0.75, described as *"deliberately
+    capped below the auto-confirm threshold ... for the same reason Windows OCR
+    is"*. `validate.LOW_CONFIDENCE` is **0.6**, so 0.75 clears it: a RapidOCR
+    reading whose arithmetic happened to balance raised no flag at all and
+    `auto_confirm_clean` signed it off with nobody having looked at it. Windows
+    OCR was doing the right thing at 0.5 next door, which is exactly what made
+    the false claim easy to believe.
+
+    Now 0.55 -- above Windows OCR's 0.5 because this engine really is more
+    accurate, below 0.6 because the promise has to be true. The test that was
+    supposed to guard this compared the cap against **its own constant**, which
+    is true of any value whatsoever; it now compares against `LOW_CONFIDENCE`,
+    so the two cannot drift apart again. A second test had been quietly
+    measuring the cap rather than the mean it was named for, because its sample
+    scores averaged 0.6 (`app/extract/rapid_ocr.py`, `app/validate.py`).
+74. **Two accounts of PyInstaller, flatly contradicting each other.** Also from
+    the review. `rapid_ocr.py` said a module name passed as a string to
+    `importlib.import_module` is invisible to PyInstaller's analysis, so the
+    slim build stays slim; `Bookkeeping.spec` said PyInstaller resolves the
+    literal exactly as it resolves an import, which is why the spec carries an
+    `excludes` list at all. **The spec is right** -- §11.65 records the slim
+    build reaching 97 MB proving it. The hazard was concrete: a maintainer
+    trusting `rapid_ocr.py` could delete the excludes and triple the file the
+    build exists to keep small. The importlib form stays for the other half of
+    its reason -- staying loadable when the package is genuinely absent -- and
+    the comments now say so.
+
+    The same review found quoted figures that had gone stale and, in one
+    docstring, **two different scores for Windows OCR at once**, measured on
+    corpora of different sizes with neither named. All regenerated from the
+    committed baselines with the corpus stated, which is the discipline
+    `tools/accuracy.py` was written to enforce and this violated
+    (`app/extract/rapid_ocr.py`, `app/extract/__init__.py`).
+75. **Removing a secret in a follow-up commit does not remove it from the
+    history you are about to publish.** The most useful entry in this section,
+    because the mistake survived a scan that was looking directly for it.
+
+    Having reintroduced the real identifiers (§11.73's neighbour), they were
+    taken out again in a second commit, and a grep of the working tree came back
+    clean -- so the push looked safe. It was not. The first commit's *tree* still
+    carried all three values, that commit was one of twenty-six the push would
+    publish, and a later deletion changes nothing about what an earlier commit
+    contains. Caught by the pre-push safety review, not by me, and not by the
+    scan in the publish script either: **that scan grepped `refs/heads` and
+    `refs/tags`, which resolve to tip trees, and never walked the commits in
+    between.** A check that only inspects the tip is not a check.
+
+    The fix has to be a rewrite, not another edit. The two pending commits were
+    collapsed into one whose tree never contained the values -- chosen over
+    `filter-repo` deliberately, because the resulting tree is then literally the
+    one that can be grepped rather than one a rewriting tool is trusted to have
+    cleaned. Both are legitimate; only one is directly verifiable.
+
+    The same review found a **zero-byte file named `1649$` committed to the
+    repository root** -- debris from a shell typo where `$$` expanded to the
+    process id. It had been looked for under the name `$$$`, not found, and
+    declared absent; `git add -A` then swept it in. Harmless, and it would have
+    been the first thing a visitor to a public repository saw.
 
 ---
 
@@ -2078,11 +3002,11 @@ sibling projects under `D:\claude`:
   reports it as a second Markdown document, because that is what the workspace
   convention normally forbids. The exception exists because GitHub renders
   `README.md` as the repository's landing page and will not render
-  `Bookkeeping.md`; without it a public repository presents as a bare file listing
+  `Bookkeeping_record.md`; without it a public repository presents as a bare file listing
   with no entry point. The division of labour is strict, and keeping it strict is
   what stops this becoming a genuine duplicate: **`README.md` is a landing page
   for a human visitor** — what the project is, the measured numbers, how to run
-  it, what it cannot do — and **`Bookkeeping.md` remains the single source of
+  it, what it cannot do — and **`Bookkeeping_record.md` remains the single source of
   truth** for architecture, rejected alternatives, fix history and handoff. When
   the two disagree, this document wins and the README is the one to correct.
 - Ignored: `data/` (personal), `dist/` and `build/` (regenerable). **Because the
@@ -2119,42 +3043,71 @@ word boxes and a transcription instead of as an image.
 
 ---
 
+## 12a. Open, deferred by the user
+
+Raised by review during the 1.12.x work and **deliberately not acted on yet** --
+the user asked for them to be recorded and picked up on request. None blocks the
+app; all were reported rather than found by accident, so they are worth keeping
+in one place rather than rediscovering.
+
+**Item 5 was partly overtaken by 1.13.0**, which was about naming and
+categorising Costco's lines rather than reading more of them. The seven missed
+items and the lost subtotal are untouched and still open. One consequence is now
+visible rather than latent: at the size the app stores the image, `SUBTOTAL
+188.37` reads as `SL'BT TAL 188.37` and is parsed as a *purchased line*, which
+is what produces the "items plus tax come to 315.37 but the total reads 5.15"
+flag on screen. Worth folding into item 5 rather than treating as new.
+
+**That decision point is now closed.** The harness used to score six of seven
+photographs on self-checks alone, because only Walmart1 had a transcription.
+`tools/export_truth.py` now writes one for every receipt confirmed in the app,
+into a gitignored file -- so the figures never reach the repository and the
+measurement still works. Six of seven are scored against real truth as of
+1.15.0.
+
+| # | Where | What |
+| --- | --- | --- |
+| 1 | ~~`Bookkeeping_record.md` 1.12.0 row, `README.md`~~ | **Decided in 1.15.0, and the decision drew a line worth keeping.** *Aggregate* figures -- a subtotal, a tax, a total -- stay: they are not identifying on their own and they are the substance of a changelog documenting a real defect. *Itemised* data does not go into git at all, because a list of what one person bought, for how much, on what day is the thing the image policy exists to protect. That is why the exported truth file is gitignored (§3). The audit that came with the decision found something worse than the figures and fixed it -- see §11.57. |
+| 2 | ~~`app/extract/receipt_text.py`, `_find_summary_amounts`~~ | **Closed in 1.13.1 (§11.53), and it was never latent.** The entry described a bare `TAX 0.00` arriving before the rate lines and blocking the rate sum. The same mechanism with a non-zero value was reading Costco's tax a cent high on every scan; comparing against the user's confirmed books is what surfaced it. `_settle_tax` now decides between the two by the receipt's own arithmetic. |
+| 3 | `app/ui/receipts.py`, `toggle_raw` docstring | Says the pane shows "exactly what the engine returned". With masking on -- the default -- every digit is an asterisk, so "exactly" is wrong on the default path. The truth is stated three lines below and on screen, so it misleads only briefly. |
+| 4 | `Bookkeeping_record.md` 1.12.1 row | Does not record that a real membership number reached a code comment, the test and that row, and was removed by amending the unpushed commit rather than by a follow-up. The 1.11.2 row is the precedent for recording that kind of decision without reproducing the value. |
+| 5 | Costco recognition (still open) | Seven of sixteen line items are still missed and the subtotal is lost in OCR (`SUBTOTAL 188.37` reads as `SUBT TRL`, no amount). Agreed scope at 1.12.0 was the summary block and false lines only. The gap is those seven items (66.26) plus one `5.99` read as `5.93`. |
+
+---
+
 ## 13. Ideas not built
 
 Ranked by how much they would improve the daily experience:
 
-1. **More real receipts.** There is now exactly one
-   (`tests/test_real_receipt.py`) and it immediately found a mis-categorisation
-   bug, so the next few are likely to be just as productive. Worth collecting a
-   handful — a restaurant bill, a fuel receipt, something faded or folded, a
-   non-USD one — with hand-checked expected values, and reporting per-field
-   accuracy across them. One receipt is an anecdote.
+1. **More real receipts.** **All eight** photographs now carry a transcription
+   and are scored per field, which is what 1.15.0 made cheap — confirming a
+   receipt in the app is the whole of the work. The restaurant bill this entry
+   used to ask for arrived in 1.17.1 and found two defects (section 9). Still
+   missing: a **fuel** receipt, a sit-down bill with a **tip line**, something
+   faded or folded, and a **non-USD** one — every amount pattern in
+   `receipt_text` assumes a `.` decimal separator, so a comma-decimal receipt is
+   the one most likely to fail outright rather than partially.
 2. **Learning from corrections.** When a reviewer re-categorises the same item
    name twice, offer to create the keyword rule. The rules table already supports
    it; only the suggestion is missing. This matters more since 1.3.0: an offline
    reading leaves ~40 % of lines uncategorised, and those corrections are exactly
    the signal that would fix it permanently.
-3. **Cross-check the item count against "# ITEMS SOLD".** Walmart prints the
-   number of items on the receipt, which is an independent constraint on whether
-   the reading dropped a line — free, and stronger than the subtotal check alone,
-   because it catches a dropped line whose amount was also missed. The offline
-   engine currently loses lines silently apart from the money not adding up.
-4. **Use the arithmetic residual to re-read ambiguous rows.** When the items are
+3. **Use the arithmetic residual to re-read ambiguous rows.** When the items are
    short by exactly 0.9 × a parsed amount, a leading digit was lost and which row
    it was is usually determinable. Would need care: see §10 on not guessing, so
    this should propose a correction in the review pane rather than apply one.
-5. **Drag and drop onto the window.** Tk cannot do it without `tkdnd`, a
+4. **Drag and drop onto the window.** Tk cannot do it without `tkdnd`, a
    non-stdlib dependency; the file dialog and clipboard paste cover the same need
    for now.
-6. **Budgets and month-over-month deltas** on the reports page.
-7. **A date picker** in the review pane instead of a typed `YYYY-MM-DD` box.
-8. **PDF and emailed receipts** (the Anthropic API takes PDFs as document blocks,
+5. **Budgets and month-over-month deltas** on the reports page.
+6. **A date picker** in the review pane instead of a typed `YYYY-MM-DD` box.
+7. **PDF and emailed receipts** (the Anthropic API takes PDFs as document blocks,
    so the engine change is small).
-9. **Multi-page or multi-receipt images** — currently one image is one receipt.
-10. **Code signing**, to stop the SmartScreen warning. §7 sets out the mechanism
+8. **Multi-page or multi-receipt images** — currently one image is one receipt.
+9. **Code signing**, to stop the SmartScreen warning. §7 sets out the mechanism
    and the options with costs; the cheapest real answer is Azure Artifact
    Signing at about $10/month, and doing nothing is defensible.
-11. **Batch scanning via the Message Batches API** at half price, for someone
+10. **Batch scanning via the Message Batches API** at half price, for someone
    scanning a shoebox of receipts at once.
 
 ---
@@ -2171,6 +3124,14 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.17.1 | 2026-09-10 | **What the pre-push reviews caught.** Three wrong comments, one of which was a real defect rather than wrong prose (§11.73-74). `MAX_CONFIDENCE` was 0.75 while `LOW_CONFIDENCE` is 0.6, so a RapidOCR reading with balanced arithmetic raised no flag and `auto_confirm_clean` signed it off unreviewed -- while the comment promised the exact opposite, citing Windows OCR, which was doing it correctly at 0.5. Now 0.55, and the test that was meant to guard it compares against the real threshold instead of against its own constant. `rapid_ocr.py` and `Bookkeeping.spec` also gave flatly opposite accounts of whether PyInstaller resolves a literal name passed to `importlib`; the spec is right, and believing the other one would have meant deleting the excludes that keep the slim build at 30 MB. Quoted figures regenerated from the committed baselines with the corpus named -- one docstring had been carrying two different Windows OCR scores at once. **Separately, the pre-push scan caught me reintroducing the very identifiers §11.57 exists to remove**: writing up the card-digit fix put a real last-four and a real approval code into a comment, a test literal and this document. All replaced with invented values, kept distinct from each other so the test still proves what it claims. 515 tests. |
+| 1.17.0 | 2026-09-08 | **A second offline engine, and a second build to carry it.** The user judged the recognition not good enough and asked for a better open-source model. First the correction: Claude vision had never run on their receipts at all -- no API key -- so everything they had seen was Windows OCR. Surveyed the field against the constraints that bind here (offline, CPU, no key, portable): docTR, EasyOCR and Surya need PyTorch, the VLM readers need a GPU, PaddleOCR needs its own runtime. **RapidOCR** fits -- PP-OCR models on ONNX Runtime, Apache 2.0, weights in the wheel. Measured through the same parser against the confirmed receipts: 73 lines matched against 63, 4 missed against 14, none invented against 3, and 59 item names exact against 37; on Costco 15 of 16 items instead of 12, and it reads the logo Windows OCR cannot read at any scale. It costs 95 MB and 1.7 seconds of start-up, so there are now two builds from one spec: `build.bat` gives the 30 MB portable one and `build.bat --full` the 125 MB one. Three traps on the way, all in §3 and §11.63-66, the sharpest being that touching WinRT first stops onnxruntime loading at all. 447 tests. **This document was also renamed from `Bookkeeping.md` to `Bookkeeping_record.md`** — the workspace convention since August 2026 — with `git mv` so the history follows, and the 18 references to it across the code, tests and README updated. Folded into this version rather than given a patch bump of its own, because 1.17.0 is not published. **The accuracy harness was then pointed at the new engine**, which it had never been: `measure_accuracy.py` built a `WindowsOcrExtractor` unconditionally, so from the moment RapidOCR became the default the `--check` gate was guarding an engine the full build no longer ran — and saying nothing about it. It now takes `--engine` and defaults to `auto`, the first installed of RapidOCR → Windows OCR → Tesseract, which is the application's own order minus Claude; Claude is excluded because its reading is not deterministic and so cannot back a regression baseline, not because of the cost. Baselines are per engine (`accuracy_baseline.rapid.json`, `accuracy_baseline.windows.json`) and a cross-engine `--check` is **refused rather than reported**, since every metric moving at once measures the change of engine and nothing the code did. Two defects found while building it: an unrecognised engine name fell through `build_engines` to the head of the fallback list, which would have answered a typo by running Claude; and resolving the engine before looking for photographs turned a clean clone's "none found" into "no engine available". Both are pinned by tests. The headline figures are now reproducible from one command each rather than quoted from a one-off run — windows 63/14/3 and 37 names, rapid 73/4/0 and 59 names, $117.40 against $14.87 unaccounted across seven photographs. **That measurement then paid for itself**: attributing all 18 remaining defects line by line showed the model was no longer the constraint. Five of the fourteen wrong names were one confusion — a capital O printed as a zero — which a larger recogniser could not have fixed, since the ambiguity is in the ink rather than the reading. Two narrow parser rules put them back (§11.68) and names exact went **59 → 64 of 73**, Walmart1 reaching 23 of 23, with no line lost and none invented. What remains is three genuine detection misses, three rows where Aldi's FP/NF column bleeds into its neighbour, two parser gaps, and two names where the reader spelled the word correctly and the paper did not. On the open question of whether to move to PP-OCRv6 medium: it would cost about 100 MB of weights for perhaps three of the thirteen defects left, so it stays untested rather than adopted. **Then the largest of those remaining clusters turned out not to be a model problem either** (§11.69): the page is photographed 1.5° off square, which on a receipt's widely spaced columns is enough to tip a line's left-hand end into the row above. The angle was already in the data — RapidOCR's detector returns rotated polygons and the code was flattening them to bounding boxes — so grouping along the measured baseline took 73 → 75 lines matched, 4 → 2 missed, 64 → 68 names, and **$14.87 → $0.95 unaccounted** across seven photographs, with Costco and ALDI1_new reconciling exactly. Of the eighteen defects this version started with, nine remain and none of them is the recogniser's fault. **Then the user supplied a KFC receipt and a fourth Walmart** -- the first restaurant bill ever tested here, and the variety gap section 13 has ranked first for weeks. It read the new chain's merchant, date and tax first time and correctly refused to invent prices for the four unpriced combo components, but it exposed two defects (§11.70-71), one of them long-standing and serious: `Cashier: Zackariah` matched CASH, so **three of the eight photographs had been recording a card purchase as cash**, and the card's last four digits were being read off the approval code. Both fixed, plus `CARRY OUT` as a total label for a receipt that never says TOTAL. All eight now report the right tender; KFC1 reconciles 11.89 + 0.95 = 12.84; nothing on the older six moved. Money unaccounted across eight photographs is **$0.15**, all of it the 5-cent bottle deposit that the O-for-zero flag still swallows. **That last gap then closed too** (§11.72), and the user's own observation is what found it: the previous engine handled the deposit line correctly, because Windows OCR boxes *words* and rebuilds the lost space from geometry while RapidOCR boxes *lines* and simply omits it. The parser now reads a lone zero in the flag column as the letter O. **$0.00 unaccounted across all eight photographs**, Walmart1 at 24 of 24 names, and for the first time every line of every transcribed receipt read with none missed and none invented -- 59/0/0 against Windows OCR's 49/10/2 on the same corpus. 515 tests. **The user then checked every photograph line by line** and exported them to truth -- the first time the whole corpus has carried a human transcription, and the first to include a restaurant bill. `ALDI.jpg` was renamed back to `ALDI1_new.jpg` to match the name its receipt is confirmed under, since the exporter finds photographs by filename and the earlier rename had orphaned 18 verified lines. Scored against the full set: **81 matched, 4 missed, none invented, 74 names exact, $0.00 unaccounted**, against Windows OCR's 66/19/3 and 41 names. ALDI2 and Walmart1 are exact line for line and name for name. Of the twelve differences left, five are the recogniser, three the parser (§9), and four are a single scope question -- KFC's unpriced combo components and its absent subtotal, both of which the user *did* record by hand, so the app is not capturing something they want. That is the next thing to decide rather than a defect to fix quietly. |
+| 1.16.0 | 2026-09-08 | **A line you type is now looked up too, and a dead end says so.** Reported from a screenshot of two lines with nothing underneath them. They had failed for opposite reasons: one was added by hand and had never been asked about at all, the other had been asked weeks earlier and genuinely has no name and no translation. So the fix is two. `enrich_now` runs the expansion and translation passes over the stored rows after every save -- filling blanks only, never touching amounts, categories or a confirmed status -- and a question that came back empty is now recorded and shown as `no translation found` / 未找到译文 rather than left blank. Nothing is said where nothing was asked, so plain-English lines stay quiet. A lookup that *failed* is deliberately not recorded as a lookup that found nothing (§11.62). The pane refreshes when the pass finishes only if the reviewer has not started typing again. Measured on the real receipt: `DOVE BW 11OZ` becomes 多芬 BW 11OZ, `EQJELLUBE80Z` says 未找到译文, and the receipt stays confirmed. 432 tests. |
+| 1.15.0 | 2026-09-07 | **Hand-verification stops being disposable.** The most expensive thing anybody does with this application is check a receipt line by line, and until now the result went into the books and nowhere else -- the next parser change could undo it and no test would notice. `tools/export_truth.py` turns every receipt confirmed in the app into a ground-truth record, so the accuracy harness scores **six of seven photographs against a real transcription instead of one**, and `--check` can fail on a regression that previously nothing could see. The output is gitignored, which is the answer to §12a item 1: aggregate figures may stay in the prose, an itemised list of one person's shopping may not go into git at all -- and it would be useless there anyway, since the photographs are ignored too. A tracked transcription still outranks an exported one, because a reviewer fills in fields the photograph does not show and Walmart1's header is out of frame. Auditing for that decision turned up real card and transaction identifiers already published in the test files (§11.57). 425 tests; baseline refreshed, because invented-line counts went from unmeasurable to measured rather than from good to bad. |
+| 1.14.1 | 2026-09-07 | **A saved window geometry could reopen off the screen.** Noticed while screenshotting: the stored geometry was `2461x1733+421+1034` and the window came up with most of itself below the bottom edge. The guard checked only that the top-left corner was visible and never that the window fitted, so it passed. Now clamped rather than accepted or rejected, and clamped against the desktop's **work area** rather than its full height — the first cut of the fix used `winfo_screenheight`, which counts the taskbar's pixels, and left 75 rows of the window behind it. `SPI_GETWORKAREA` gives the honest number. 418 tests. |
+| 1.14.0 | 2026-09-07 | **The receipt's own item count is now a check.** First step of the approach the user set out: feed in receipts, verify them, and turn each round of verification into something permanent. The money check says how much is unaccounted for; it never said how many lines to look for, and that is the number that tells a reviewer when they have finished. Every chain here prints the figure and all three print it differently — `ITEMS SOLD 21`, `18 ITEMS`, and Costco's `TOTAL NUMBER OF ITEMS SOLD` which OCR reduces to `TOTAL NUMBER OF 1 EMS sot-c 16` — so `_find_items_sold` carries a pattern per dialect and anchors the Costco one on the surviving `NUMBER OF`. A bare `SOLD 16` is deliberately unmatched: the second Costco pass returns `sold 6` for that line, and a wrong count is worse than none. Discounts and container deposits are excluded — Walmart prints 21 sold against 24 lines, the difference being three Maine deposits — and with that exclusion the printed count agrees exactly with all six of the user's confirmed receipts, which is the evidence the rule rests on. Only a shortfall is flagged, phrased as *at least*, because an invented line hides a missed one. Stored on the row (schema v8) so the flag survives a save. 407 tests, no accuracy regression; the flag now fires correctly on four of the six photographs and stays silent on the two read completely. |
+| 1.13.1 | 2026-09-07 | **Five parsing defects, all found by comparing the engine against the user's own corrections.** They went through all six receipts in the application by hand and confirmed each one, which made the books a ground truth and made the differences measurable (§9). (1) Costco prints a per-line flag in the *left* margin where Walmart and Aldi print it on the right, so `E 96716 ORG SPINACH` kept flag and item number inside the name — one fault wearing fifteen wrong names, and fixing it took that photograph from 0 of 16 names exact to 5. (2) `SUBTOTAL` read as `SUBT TAL` was not recognised as summary at all, so the subtotal was booked as the receipt's largest purchase. (3) A stated `TAX 5.16` beat a rate breakdown that summed to the correct 5.15; `_settle_tax` now lets the receipt's own arithmetic decide, closing §12a item 2, which had been recorded as latent and was not. (4) `24.81 TOTAL PURCHASE` — a total printed before its label — was invisible, which is why one Walmart receipt reported no total. (5) A hand-typed `2026-8-18` sorted above `2026-09-06`, putting the oldest receipt at the top of the list. Measured after: Costco header 3/5 → 5/5 and invented lines 3 → 2, Walmart2 header 4/5 → 5/5, the Aldi and Walmart3 rows unmoved. 393 tests, no accuracy regression. ALDI2's missing total was diagnosed and deliberately left: OCR loses the decimal point from `$ 17 - 43` at both scales, so there is no amount to read. |
+| 1.13.0 | 2026-09-06 | **Costco receipts are named, categorised and translated properly.** Reported from a screenshot: the merchant read as the street address and the Chinese item names were nonsense. Both had the same root -- Costco prints its own item numbers rather than barcodes, so the lookup that carries Walmart has nothing to query, and the shorthand went to the translator raw (`BUTER CROISS` came back as 黄油克罗斯). The user suggested searching costco.com; it was tried and measured, and the site answers 403 to the catalogue search and to every product page, exactly as walmart.com does. So `app/lookup/shorthand.py` expands what the paper already prints -- `KS` to Kirkland Signature (only at Costco), `ORG`, `CROISS`, `500CT`, and a store-brand prefix run into the next word -- and deliberately leaves `GP`, `CAL` and `BLUEDISH` alone, because their obvious readings are guesses about somebody's shopping. The merchant needed three passes of decreasing strictness: the logo reads as `Cosrco`, `Cesrco`, `=WHOLESAZE`, `=WHOLESALE` or nothing depending only on the size it is read at, and never correctly. Also `DRUMSTICKS` to the glossary (鼓槌 is a drum stick), three Costco keyword rules, `line_item.name_source` so the pane stops labelling every expansion `from barcode:`, and a lookup failure no longer skips the offline expansion too. Measured on the real photograph: merchant `455 Scarborough Downs Rd` becomes `Costco`, uncategorised lines 8 of 15 become 0, 380 tests, no accuracy regression on any of the seven photographs. |
 | 1.12.1 | 2026-09-03 | **The masking option promised more than it covered, and the review caught it.** The settings text said it hides *“a card or **membership number**”*, but `SENSITIVE_FIELDS` held one entry, `payment_method`, and a membership number is not a field at all — `MEMBER` is in `_SUMMARY_WORDS`, so the line is discarded before anything stores it. The one place it *does* reach the screen is the **Engine output window**, which inserts the raw engine text verbatim; a Costco reading carries the membership number in its first five lines, with the card trailer just below (not reproduced here, for the reason the receipt photographs are gitignored). So the promise was false precisely where it mattered, and a user who read it, switched the option on and handed over the laptop got exactly the disclosure it undertook to prevent. **The worst class of wrong comment: trusted while false, about a privacy control.** Fixed by making the claim true rather than by weakening it — the raw pane now masks its digits and says so, with the full text one keystroke away. Masking every digit there costs the amounts too, accepted because it is an audit view rather than a working one. Also from the same review, and found independently by both reviewers: **`_cents_text` had the sign bug its own sibling documents**. `_amount_cents` carries a four-line docstring about `int("-0")` being 0, and then `_cents_text` rendered –15 cents as `-1.85`, because Python floors so `-15 // 100` is `-1` and `-15 % 100` is `85`. Reachable through a rate-breakdown line carrying a negative amount, which a refunded receipt prints. **Documenting a trap in one direction is not the same as handling it in both.** Plus four comment corrections: `privacy.py` pointed at `ReceiptsPage._collect` when the method is on `ReviewPane`; the surviving zero-tax guard lost its explanation when the special case around it was replaced; `_find_summary_amounts`'s “last matching line wins” needed its new tax exception; and `toggle_masking`'s “nothing stored changes” was ambiguous in a method whose first statement saves the setting. 344 tests. |
 | 1.12.0 | 2026-09-03 | **A third chain, and an option to hide what a receipt says about its owner.** Costco is structurally unlike Walmart and Aldi in one way that broke the parser outright: it charges **two tax rates on one receipt** (Maine's 5.5% general and 8% prepared food) and prints a component line for each. The rule that handled Aldi's zero-rate line only stopped a zero displacing a real figure, and its own comment predicted the gap — *“two genuinely non-zero rates would still take the last; no receipt seen here does that”*. COSTCO1 is that receipt, and it read the tax as **2.29 when 5.15 was charged**. Rate components are now summed, and a line that states the tax outright beats any breakdown. Two more failures in the same block: OCR drops the second word of `TOTAL TAX 5.15`, leaving a bare `TOTAL` that read as the grand total and reported a **$193.52 purchase as $5.15** — told apart now by arithmetic, since a TOTAL equal to the sum of the rate components above it is those components' total; and `AMOUNT: $193.52` from the approval block is accepted as a total, which matters because the grand-total line on this receipt was scribbled out on the paper. Separately, Windows OCR reads Costco's `Visa` tender line as `Vise`, so it escaped the payment words and was counted as a purchase carrying the grand total — **$193.52 of nothing, more than the receipt's own subtotal**. Net on COSTCO1: tax and total now correct, items 10 → 9 and their sum 315.57 → 122.05. Aldi and Walmart read identically to before, checked figure by figure. **Seven line items are still missed and the subtotal is still lost** — OCR returns `SUBT TRL` with no amount — which was deliberately left for a second pass; the remaining 66.32 gap is those seven items (66.26) plus one `5.99` misread as `5.93`. **The new option** shows the digits of a card or membership number as asterisks: `VISA ****4471` becomes `VISA ********`, keeping the brand while dropping the number. Costco prints the member number on every copy, so this is not hypothetical. On by default, because a privacy control that must be discovered protects only those who already knew to look, and the cost runs one way. Toggled from **View → Hide sensitive details**, **Ctrl+M**, or the Settings checkbox. It is **display only**, and the trap it had to avoid is specific: the review pane's entry boxes are the same widgets the save path reads back, so rendering a mask into one would have written asterisks into the database and destroyed the value the mask exists to protect. A masked field is shown read-only and its true value passes through the save untouched, pinned by `test_saving_a_masked_receipt_never_writes_the_mask_into_the_books`. Full Chinese for the new strings. 342 tests. |
 | 1.11.7 | 2026-09-03 | **Pinned a referent.** The 1.11.6 row said “its predecessor” without saying what that was. The thing 1.11.5 audited was the `.gitignore` comment block, which 1.11.4 had rewritten — not the 1.11.4 changelog row, which is what “predecessor” most naturally points at in a table of rows. A reader following the wrong referent would search the row above for a phrase that was never in it. Named explicitly instead. No code changed; 328 tests. |
@@ -2180,7 +3141,7 @@ Ranked by how much they would improve the daily experience:
 | 1.11.3 | 2026-09-03 | **Closed the receipt-format hole, and corrected three things the 1.11.2 row got wrong.** `.gitignore` protected receipt photographs with `*.jpg`, `*.jpeg` and `*.png` only — a gap its own comment had named for weeks without anybody acting on it. A receipt is far more likely to arrive as `.heic` (the iPhone default) than as `.jpg`, and `.heif`, `.webp`, `.avif`, `.bmp`, `.tif`, `.tiff` and a scanned `.pdf` were all equally unprotected: untracked *and* unignored, so one `git add -A` would have published somebody's shopping. **All eight now ignored — nine counting `.jfif`, added later in this same commit and described below.** None is tracked anywhere, so the rules cost nothing. The three corrections, all in the 1.11.2 row above and all found by review rather than by me: it credited the blurred string to `make_sample_receipt.py` as well as `seed_demo.py`, but that file's only match is a `TC#` transaction code ending in the same four digits, and its payment line carries no *card* digits — it reads `VISA TEND` against the receipt total; it said the input box's border was left intact, when the blur eats every edge but the bottom; and it said “five fixtures” when there are four occurrences across three files, a miscount from treating `grep` hits as occurrences of the string searched for. Worth recording as a pattern rather than three separate slips: **every one is a claim that sounded authoritative because it carried a number or a filename, and none had been checked against the thing it described.** The review of this very commit then caught a fourth of exactly that kind, which is the most useful thing in this row: correcting the attribution, I wrote that `make_sample_receipt.py` has a “payment line carrying no digits at all”. It renders `VISA TEND` against `TOTAL`, so the line reads `VISA TEND    68.46` — digits, just not card digits. The point I was making survived; the absolute I reached for to make it did not. **Writing about a failure mode is not protection against it.** Two further review findings taken in the same edit: `*.jfif` added, which is what Chrome on Windows saves a JPEG as and was the one plausible receipt format still uncovered; and two real limits of these rules written down rather than left to be discovered — the patterns are case-sensitive where the filesystem is, so an iPhone's upper-case `IMG_0001.HEIC` would be unignored again on a Linux clone, and a `!` line cannot re-include a file inside an excluded directory, so nothing can rescue a `.pdf` from `pictures/` or `data/`. No code changed; 328 tests. |
 | 1.11.2 | 2026-09-03 | **The Payment field in `receipts.png` is blurred.** The user asked for it after the repository went public. The value was a card-shaped string masked to last-4 — not reproduced here, for the same reason it was blurred there — which I had checked the provenance of and deliberately left: it is a hardcoded literal in `tools/seed_demo.py`, the real receipt behind the project was paid in cash, and it is masked to last-4 anyway. That reasoning was beside the point. **A published image is judged on how it looks, not on where its data came from** -- a reader cannot audit `seed_demo.py` to reassure themselves, and a card-shaped string sitting beside real merchant names and the author's own name reads as real. Blurred with a radius large enough that no glyph survives magnification — checked at 5×, and again at 8× nearest-neighbour with a full-range histogram stretch, which raises only broad luminance blobs at a spatial frequency far below character pitch. **The blur also eats most of the input box's own border**, which an earlier version of this row wrongly said was left intact: only the bottom edge survives crisply, against all four edges on an unblurred neighbour such as Subtotal. It still reads as deliberate redaction rather than a rendering fault, because the smudge stays inside the field's rectangle under its own label — but that is the field's position in the layout and its label doing the work, not a surviving border. Recorded in `.gitignore` beside the capture instructions, because re-shooting the screenshot removes the blur and the next person to run `--tight` needs to know to redact again. Note that the string is still present as source text — **four occurrences across three files**, not the five this row first claimed: `tests/test_claude_engine.py`, `tests/test_store.py`, and `tools/seed_demo.py` twice. The miscount came from grepping the masked last-4 digits and reading the hit count as occurrences of the full string — the digits are deliberately not written out here either; the fifth hit is a `TC#` transaction code ending in the same four digits, in a file whose payment line reads `VISA TEND` against the receipt total — digits, but not card digits. The user was told and scoped this change to the image. |
 | 1.11.1 | 2026-09-03 | **What the pre-publication review caught.** The quality gate blocked, correctly, on a comment that contradicted its own code. `compare()` guards the money gap with `abs(now) > abs(before)`, which fires only when the gap GROWS, and the comment claimed it watched movement “in either direction by more than a cent” — wrong twice, and wrong in the direction that matters: it told a future maintainer the `lines_invented` guard was redundant when it is in fact the only thing catching a gap closed by fabrication. There is a test pinning the one-directional behaviour, so the code was right and the comment was the defect. Also corrected: the changed-photo note implied the score was quarantined when it is scored and compared like any other, so a re-photographed receipt can read as a regression; and a docstring I had just written enumerated three of the capture box's four margins, understating the exposure it exists to warn about. Separately, the safety review's one surviving finding was taken: the screenshots were re-included by `!docs/screenshots/*.png`, which protects a *location* rather than four known files, so any PNG later dropped there would be publishable — now an allowlist of four names. Four stale line counts. No behaviour changed; 328 tests. |
-| 1.11.0 | 2026-09-03 | **Published.** The repository went public so interviewers can read and run the project, reversing a standing private-only instruction. Prepared for that in four ways. (1) A `README.md` landing page, because GitHub renders `README.md` and not `Bookkeeping.md`, so the repository previously presented as a bare file listing with no entry point; it leads with the measured accuracy and states the network boundary explicitly. (2) Four screenshots in `docs/screenshots/`, taken against demo books — and this exposed a real hazard in `screenshot_pages.py`, whose capture box deliberately reaches ~46px above and 10px either side of the window to include the title bar. `ImageGrab` grabs the *screen*, so that margin captured fragments of other windows behind the app; the first set of images was discarded and a `--tight` flag added that clips to the client area exactly. A second set leaked the Windows username through the settings page's data-folder path and was also discarded. (3) The commit author email was rewritten across all history to a GitHub noreply address before publication. (4) `pydantic` was declared in `requirements.txt` — `app/extract/base.py` imports it directly, and it had been arriving only transitively through `anthropic`. Also corrected the tag list (22 exist, the doc claimed 8) and three stale line counts, including a Python total measured just before the 1.10.0 harness files were staged. No application code changed; 328 tests. |
+| 1.11.0 | 2026-09-03 | **Published.** The repository went public so interviewers can read and run the project, reversing a standing private-only instruction. Prepared for that in four ways. (1) A `README.md` landing page, because GitHub renders `README.md` and not `Bookkeeping_record.md`, so the repository previously presented as a bare file listing with no entry point; it leads with the measured accuracy and states the network boundary explicitly. (2) Four screenshots in `docs/screenshots/`, taken against demo books — and this exposed a real hazard in `screenshot_pages.py`, whose capture box deliberately reaches ~46px above and 10px either side of the window to include the title bar. `ImageGrab` grabs the *screen*, so that margin captured fragments of other windows behind the app; the first set of images was discarded and a `--tight` flag added that clips to the client area exactly. A second set leaked the Windows username through the settings page's data-folder path and was also discarded. (3) The commit author email was rewritten across all history to a GitHub noreply address before publication. (4) `pydantic` was declared in `requirements.txt` — `app/extract/base.py` imports it directly, and it had been arriving only transitively through `anthropic`. Also corrected the tag list (22 exist, the doc claimed 8) and three stale line counts, including a Python total measured just before the 1.10.0 harness files were staged. No application code changed; 328 tests. |
 | 1.10.1 | 2026-09-02 | Documentation reconciled (/md-renew-check, fast mode plus targeted verification of the 1.10.0 additions). The mechanical check was clean, but remeasuring the Aldi accuracy table against the code found two cells that had silently stopped being true: ALDI2 now reads its subtotal and total, which the 1.6.0 table records as not found, and ALDI1 tax reads 0.00 where the paper says 0.15 -- the harness flags that arithmetic as BAD, and whether it is a regression or an error in the original table is explicitly left undetermined. Also noted that ALDI2 7 of 7 is a hand-verified claim rather than a harness measurement, since that receipt has no transcription. One stale line count fixed, caused by accuracy_baseline.json lacking a trailing newline so wc -l and splitlines disagree by one. No code changed. |
 | 1.10.0 | 2026-09-01 | **The accuracy figures become reproducible.** Every quality number this project quoted lived in prose and covered an unrecorded set of photographs, so no later reader could tell whether a number moved because the code changed or because the corpus did. `tools/measure_accuracy.py` now runs the real engine over `pictures\` and reports items read, money unaccounted, header fields, and -- against a human transcription -- lines matched, missed and **invented**. Ground truth and the baseline are separate files and are never merged, because a harness that promotes its own output to truth passes for ever while drifting. `--check` guards invented lines as well as the money gap, so the two changes rejected in 11.42 would now fail automatically rather than by hand. Confirmed the known `DOVE BW 11OZ` defect independently: Walmart1 scores 23 matched, 1 missed, 0 invented, and the 5.47 unaccounted is exactly that line. 328 tests. |
 | 1.9.5 | 2026-08-31 | Documentation reconciled against the code (/md-renew-check, full mode). The handoff section claimed everything was pushed and tagged; nothing since 1.4.0 is either, and that claim would have sent the next session looking for work already done. Twenty stated line counts were stale after the 1.5.0–1.9.4 work, the .exe verification still quoted 1.5.1, the tag list did not say the later versions are deliberately untagged, and the 22 language tests had no entry in the verified list. No code changed. |

@@ -60,7 +60,25 @@ from app.money import to_cents                    # noqa: E402
 
 PHOTO_DIR = ROOT / "pictures"
 TRUTH_PATH = ROOT / "tests" / "fixtures" / "receipts_truth.json"
-BASELINE_PATH = ROOT / "tests" / "fixtures" / "accuracy_baseline.json"
+# Truth exported from the books by tools/export_truth.py. Gitignored, for
+# the same reason the photographs are -- and useless without them, so a
+# clone that has neither loses nothing. See that tool for the reasoning.
+LOCAL_TRUTH_PATH = ROOT / "tests" / "fixtures" / "receipts_truth.local.json"
+# One baseline per engine, because a baseline is only meaningful against the
+# engine that produced it. RapidOCR matches 73 of the printed lines where
+# Windows OCR matches 63, so scoring one engine against the other's baseline
+# reports a landslide improvement in one direction and a catastrophic
+# regression in the other -- and neither is a measurement of anything.
+#
+# Both files are kept rather than one being retired, because both builds ship:
+# the slim build has no RapidOCR at all, so its `--check` has to guard Windows
+# OCR, while the full build's has to guard the engine it actually uses.
+FIXTURE_DIR = ROOT / "tests" / "fixtures"
+
+
+def baseline_path_for(engine: str) -> Path:
+    """Where the regression baseline for one engine lives."""
+    return FIXTURE_DIR / f"accuracy_baseline.{engine}.json"
 
 # The header fields worth scoring. Deliberately not `confidence` or `currency`:
 # one is the reader's opinion of itself and the other is inferred, so neither is
@@ -99,6 +117,18 @@ class Truth:
     @property
     def has_lines(self) -> bool:
         return self.lines is not None
+
+    @property
+    def says_anything(self) -> bool:
+        """Whether this record actually asserts something about the receipt.
+
+        Most entries in the tracked file are placeholders -- the photograph is
+        named, and nothing about it has been checked. They exist so the harness
+        can say "nothing verified yet" rather than "no record", which are
+        different things, but they are not evidence and must not be mistaken for
+        it: an exported transcription should fill a placeholder, not defer to it.
+        """
+        return bool(self.header) or self.has_lines
 
 
 @dataclass
@@ -209,7 +239,12 @@ def score_reading(receipt, truth: Truth | None) -> Score:
         if name in MONEY_FIELDS:
             same = to_cents(got) == to_cents(expected)
         else:
-            same = (got or None) == (expected or None)
+            # Case and spacing are not part of the answer. A reviewer types the
+            # merchant as the sign prints it -- "ALDI" -- and the parser returns
+            # the canonical spelling from _KNOWN_MERCHANTS, "Aldi". Both name the
+            # same shop, and scoring that as a miss would hold two receipts at
+            # 4/5 for ever, which teaches a reader to discount the column.
+            same = normalise_name(got) == normalise_name(expected)
         result.header_correct += 1 if same else 0
 
     if truth.has_lines:
@@ -220,8 +255,34 @@ def score_reading(receipt, truth: Truth | None) -> Score:
     return result
 
 
-def load_truth(path: Path = TRUTH_PATH) -> dict[str, Truth]:
-    """Read the committed ground-truth file, keyed by photograph filename."""
+def load_truth(path: Path = TRUTH_PATH,
+               local: Path | None = LOCAL_TRUTH_PATH) -> dict[str, Truth]:
+    """Every ground-truth record available, keyed by photograph filename.
+
+    Two files, and the tracked one wins. It holds the receipt whose figures are
+    already public, transcribed from the paper by somebody who could see what
+    the photograph does and does not show -- Walmart1's header is out of frame,
+    so its merchant and date are recorded as *verified absent*, and a reader
+    supplying either is wrong. The exported file cannot know that: the books
+    hold whatever the reviewer typed, including fields the paper never carried.
+
+    So the local file adds photographs the tracked one does not *describe*
+    rather than overriding it -- and a placeholder does not describe anything.
+    Five of the six entries in the tracked file name a photograph and assert
+    nothing about it, and an exported transcription fills those in.
+    ``local=None`` reads the tracked file alone, which is what the exporter
+    itself wants when deciding what is already covered.
+    """
+    truths = _read_truth(path)
+    if local is not None and local.exists():
+        for photo, truth in _read_truth(local).items():
+            known = truths.get(photo)
+            if known is None or not known.says_anything:
+                truths[photo] = truth
+    return truths
+
+
+def _read_truth(path: Path) -> dict[str, Truth]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     truths: dict[str, Truth] = {}
     for photo, entry in raw.get("receipts", {}).items():

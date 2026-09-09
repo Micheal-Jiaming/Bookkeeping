@@ -58,6 +58,7 @@ class ItemEdit:
     category_id: int | None = None
     category_source: str = "manual"
     raw_description: str | None = None
+    name_source: str | None = None
     sku: str | None = None
     is_discount: bool = False
     taxable: bool | None = None
@@ -82,6 +83,36 @@ class ReceiptEdit:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+_TYPED_DATE = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$")
+
+
+def normalise_date(text: str | None) -> str | None:
+    """Pad a hand-typed date to YYYY-MM-DD, or leave it exactly as it is.
+
+    Dates are stored and compared as text -- the listing orders by
+    ``purchased_at`` and the report filters use ``>=`` and ``<=`` -- so a month
+    without its leading zero sorts as though it were the largest month of the
+    year. A receipt entered as "2026-8-18" appeared above "2026-09-06" at the
+    top of the Receipts page, looking like the newest of the six.
+
+    Only the padding is corrected, and only when the text is already this shape.
+    Anything else the reviewer typed is stored untouched rather than guessed at:
+    the field is theirs, and a value this cannot parse is better shown back to
+    them as they wrote it than silently reinterpreted.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    match = _TYPED_DATE.match(raw)
+    if not match:
+        return raw
+    year, month, day = match.groups()
+    try:
+        return date(int(year), int(month), int(day)).isoformat()
+    except ValueError:      # 2026-13-40 and the like: not a date, so not ours
+        return raw
 
 
 # --------------------------------------------------------------------------- #
@@ -273,6 +304,7 @@ def save_receipt(receipt_id: int, edit: ReceiptEdit, *, confirm: bool = False) -
             "line_no": index,
             "description": (item.description or "").strip(),
             "raw_description": item.raw_description,
+            "name_source": item.name_source if item.raw_description else None,
             "sku": item.sku,
             "quantity": item.quantity,
             "unit_price_cents": item.unit_price_cents,
@@ -285,6 +317,13 @@ def save_receipt(receipt_id: int, edit: ReceiptEdit, *, confirm: bool = False) -
         for index, item in enumerate(edit.items)
     ]
 
+    # The printed item count is the receipt's own statement, not a field the
+    # reviewer edits, so it is read back from the row rather than carried on the
+    # edit. Without it the "N lines are missing" flag would disappear the first
+    # time a draft was saved, whether or not the lines had been added.
+    with connect() as db:
+        row = db.execute("SELECT items_sold FROM receipt WHERE id = ?",
+                         (receipt_id,)).fetchone()
     flags = check(
         purchased_at=edit.purchased_at,
         total_cents=edit.total_cents,
@@ -293,6 +332,7 @@ def save_receipt(receipt_id: int, edit: ReceiptEdit, *, confirm: bool = False) -
         tip_cents=edit.tip_cents,
         items=items,
         confidence=None,
+        items_sold=row["items_sold"] if row else None,
     )
     # Confirming is the reviewer's call: they may confirm a receipt whose
     # arithmetic still disagrees (some receipts really do not add up), and the
@@ -316,7 +356,7 @@ def save_receipt(receipt_id: int, edit: ReceiptEdit, *, confirm: bool = False) -
             """,
             (
                 (edit.merchant or "").strip() or None,
-                (edit.purchased_at or "").strip() or None,
+                normalise_date(edit.purchased_at),
                 edit.currency or "USD",
                 edit.subtotal_cents,
                 edit.tax_cents,
@@ -373,12 +413,13 @@ def _replace_items(db: sqlite3.Connection, receipt_id: int, items: list[dict]) -
     for item in items:
         db.execute(
             "INSERT INTO line_item (receipt_id, line_no, description, raw_description, "
-            "sku, quantity, unit_price_cents, amount_cents, category_id, "
+            "name_source, sku, quantity, unit_price_cents, amount_cents, category_id, "
             "category_source, is_discount, taxable) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 receipt_id, item["line_no"], item["description"], item["raw_description"],
-                item["sku"], item["quantity"], item["unit_price_cents"],
+                item.get("name_source"), item["sku"], item["quantity"],
+                item["unit_price_cents"],
                 item["amount_cents"], item["category_id"], item["category_source"],
                 item["is_discount"], item["taxable"],
             ),
