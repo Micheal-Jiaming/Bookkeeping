@@ -9,7 +9,7 @@ gone to the trouble of installing it.
 
 RapidOCR sits above Windows OCR on the totals over the eight photographs the
 user confirmed line by line -- 81 printed lines matched against 66, 4 missed
-against 19, none invented against 3, and 74 item names exact against 41
+against 19, none invented against 3, and 76 item names exact against 41
 (Bookkeeping_record.md section 9). Per photograph it is **better on six,
 identical on `Walmart2.jpg`, and worse on `Walmart4.jpg`**, where it loses the
 space in `GV RY RD IC` and scores 2 names exact to the Windows engine's 3.

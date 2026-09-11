@@ -136,8 +136,16 @@ _SKU = re.compile(r"\b(\d{9,14})\b")
 # The money was always right; the description was unusable. The rate reads
 # "<weight> lb @ 1 lb /<price per lb>", so the number after the slash is the
 # unit price and the one before the unit is the quantity.
+#
+# `lb` comes back as `1b` about as often as not: in this font the letter l, the
+# digit 1 and a dotless capital I are one stroke, and unlike the O-for-zero
+# confusion there is no surrounding word for the recogniser to break the tie
+# with. Accepting `[l1i]bs?` -- all three strokes, with the optional plural --
+# costs nothing and buys back the whole item name, because the line above is
+# merged in only when this pattern matches; miss the unit and the item ends up
+# named after its own rate line.
 _WEIGHED = re.compile(
-    r"^\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>lb|lbs|kg|g|oz)\b.*?/\s*\$?"
+    r"^\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>[l1i]bs?|kg|g|oz)\b.*?/\s*\$?"
     r"(?P<price>\d[\d,]*\.\d{2})", re.IGNORECASE)
 
 # An item with no printed name: the receipt shows its barcode where the
@@ -167,7 +175,40 @@ _BARE_BARCODE = re.compile(r"^\d{9,14}$")
 # chain. The letter is dropped rather than interpreted: what Costco means by it
 # is not stated anywhere on the receipt, and guessing would put a claim in the
 # books that nothing supports.
-_LEADING_ITEM_NO = re.compile(r"^(?:(?P<flag>[A-Za-z])\s+)?(?P<no>\d{4,8})\s+(?=\S)")
+#
+# The flag is one letter on paper, but the recogniser returns it doubled or
+# trebled often enough to matter -- "EEE 9218 RED ONIONS" where the margin
+# prints a single E -- because the glyph is a hairline the detector splits.
+# A repeated letter is therefore allowed, written as a backreference rather
+# than [A-Za-z]{1,3}: a run of the *same* letter is the duplication being
+# modelled, where three arbitrary letters would eat the opening words of any
+# description that happened to be followed by a number.
+_LEADING_ITEM_NO = re.compile(
+    r"^(?:(?P<flag>(?P<flag_char>[A-Za-z])(?P=flag_char){0,2})\s+)?"
+    r"(?P<no>\d{4,8})\s+(?=\S)")
+
+# Some Aldi lines come back with a second number between the description and
+# the price -- "343415 24ct Paper Bowl 356387 2.69 NB" -- where 343415 is the
+# item number in the left margin and 356387 belongs to no column the receipt
+# labels. Left alone it lands inside the item name, where it is visible
+# rubbish in the books.
+#
+# **Where that number comes from is not established.** It appears exactly once
+# in this receipt's reading, which argues for its being printed on that line;
+# but the hand transcription of the same 2026-08-21 receipt in
+# tests/test_units.py records 356387 as another row's item number, which argues
+# for a neighbouring row tipped in by the 1.5 degree page skew (11.69). The
+# files cannot settle it -- only the paper can -- and an earlier draft of this
+# comment wrongly used the first fact to rule out the second.
+#
+# It does not need settling, because a bare number at the tail of a description
+# is not part of the name whichever row printed it, and the rule is bounded so
+# that being wrong about the cause costs nothing: it runs only once a leading
+# item number has been found, so Walmart's layout never reaches it; only on a
+# run of five to eight digits, so a description ending in a size or a year
+# keeps its number; and never on the whole description, because _find_items
+# requires letters to survive the strip.
+_TRAILING_ITEM_NO = re.compile(r"\s+\d{5,8}$")
 
 # **Capital O read as zero, which no recognition model can fix.**
 #
@@ -869,6 +910,12 @@ def _find_items(
             if leading and re.search(r"[A-Za-z]", head[leading.end():]):
                 sku = leading.group("no")
                 head = head[leading.end():].strip(" .-*")
+                # ...and drop a second number printed after the description,
+                # but never the description itself: if nothing with letters in
+                # it survives, what matched was the name and not a code.
+                trimmed = _TRAILING_ITEM_NO.sub("", head).strip(" .-*")
+                if re.search(r"[A-Za-z]", trimmed):
+                    head = trimmed
         if sku_match:
             # Walmart prints a second flag between the UPC and the price -- "F"
             # for food, "N" for non-taxable -- which is not part of the item

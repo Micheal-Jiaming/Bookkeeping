@@ -29,6 +29,16 @@ from dataclasses import dataclass
 
 DEFAULT_CATEGORY = "Uncategorized"
 
+# Where a line item goes when it has no category of its own. Deliberately not
+# DEFAULT_CATEGORY: "Uncategorized" is a *marker* meaning nobody has decided
+# yet -- which is why category_names() below withholds it from the candidate
+# list offered to the model -- whereas "Other" is a decision, the bucket for
+# something that fits nowhere else. A row the reviewer typed in by hand has
+# been identified by a human and merely belongs to no named category, so it
+# takes the decision and not the marker. Rule creation is a separate path and
+# does offer every category, Uncategorized included; see app/ui/rules.py.
+MISCELLANEOUS_CATEGORY = "Other"
+
 
 @dataclass(frozen=True)
 class Rule:

@@ -11,7 +11,7 @@ and run through ONNX Runtime. Both engines through the same parser, over the
 **eight photographs the user has confirmed line by line** (2026-09-09):
 
     Windows OCR   66 matched   19 missed   3 invented   41 names exact
-    RapidOCR      81 matched    4 missed   0 invented   74 names exact
+    RapidOCR      81 matched    4 missed   0 invented   76 names exact
 
 Recomputed with ``py tools\\measure_accuracy.py --engine <name>``, and the same
 figures are in ``tests/fixtures/accuracy_baseline.{rapid,windows}.json``. **Say

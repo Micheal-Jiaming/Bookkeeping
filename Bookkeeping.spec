@@ -52,7 +52,7 @@ bundled = ['anthropic', 'httpx', 'httpcore', 'certifi', 'winrt']
 
 # RapidOCR reads receipts markedly better than the Windows engine -- over the
 # eight hand-verified photographs, 81 printed lines matched against 66, 4 missed
-# against 19, none invented against 3, and 74 item names exact against 41 -- and
+# against 19, none invented against 3, and 76 item names exact against 41 -- and
 # costs 95 MB and 1.7 seconds of start-up to carry.
 # (Figures from tests/fixtures/accuracy_baseline.{rapid,windows}.json. Name the
 # corpus or do not quote the number: this comment carried seven-photograph,

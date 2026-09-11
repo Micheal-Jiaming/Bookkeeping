@@ -789,6 +789,62 @@ def test_the_flag_column_is_not_invented_where_there_is_none():
     assert item.sku == "356387"
 
 
+def test_a_flag_letter_the_recogniser_doubled_is_still_a_flag():
+    """The margin prints one letter; the reader sometimes returns three.
+
+    "EEE 9218 RED ONIONS" is one E in a condensed font that the detector split.
+    Before this the line failed the pattern outright -- it is not a single
+    letter followed by digits -- so the flag and the item number both stayed
+    inside the description.
+    """
+    receipt = parse_receipt_text("COSTCO\n\nEEE 9218 RED ONIONS 4.89\nTOTAL 4.89\n")
+    item = receipt.items[0]
+    assert item.description == "RED ONIONS"
+    assert item.sku == "9218"
+
+
+def test_a_run_of_different_letters_is_a_description_not_a_flag():
+    """Only a repeated letter counts as a flag, or real words get eaten.
+
+    The duplication being modelled produces the same glyph over again. Three
+    unrelated letters in front of a number are far likelier to be the opening
+    of the item's own name, so they are left where they are.
+    """
+    receipt = parse_receipt_text("COSTCO\n\nABC 9218 RED ONIONS 4.89\nTOTAL 4.89\n")
+    assert receipt.items[0].description == "ABC 9218 RED ONIONS"
+
+
+def test_a_second_number_after_the_description_is_dropped():
+    """Aldi prints one number in the margin and sometimes another after the name."""
+    receipt = parse_receipt_text(
+        "ALDI\n\n343415 24ct Paper Bowl 356387 2.69 NB\nTOTAL 2.69\n")
+    item = receipt.items[0]
+    assert item.description == "24ct Paper Bowl"
+    assert item.sku == "343415"
+
+
+def test_a_description_ending_in_a_short_number_keeps_it():
+    """Four digits at the end of a name is a size or a year, not an item code."""
+    receipt = parse_receipt_text("ALDI\n\n343415 SPRITE 2000 1.99 NB\nTOTAL 1.99\n")
+    assert receipt.items[0].description == "SPRITE 2000"
+
+
+def test_a_weighed_item_whose_unit_read_as_1b_keeps_its_name():
+    """`lb` and `1b` are the same strokes, and only the pattern can tell them apart.
+
+    The entire name rides on it: the line above is merged in only when the
+    weighing line is recognised, so a missed unit renames the item after its
+    own rate line -- "0.42 1b. @ 1.00 1b. / 3.62" instead of "GINGER ROOT".
+    """
+    receipt = parse_receipt_text(
+        WALMART_WEIGHED_ITEM.replace("0.42 lb @ 1.00 lb / 3.62",
+                                     "0.42 1b. @ 1.00 1b. / 3.62"))
+    descriptions = [item.description for item in receipt.items]
+    assert descriptions == ["BG ALM UNVAN", "GINGER ROOT", "GVCORNSTARCH"]
+    assert receipt.items[1].quantity == 0.42
+    assert receipt.items[1].unit_price == "3.62"
+
+
 def test_a_word_is_not_mistaken_for_the_flag_column():
     """Only a lone letter is a flag; a real first word stays in the name."""
     receipt = parse_receipt_text("SHOP\n\nORG 12345 SPINACH 4.69\nTOTAL 4.69\n")

@@ -1032,7 +1032,7 @@ build section below):
 | size | 30.2 MB | 125.5 MB |
 | start-up | 3.5 s | 5.2 s |
 | offline reader | Windows OCR | RapidOCR, falling back to Windows OCR |
-| reads (of the confirmed lines) | 66 matched, 41 names exact | 81 matched, 74 names exact |
+| reads (of the confirmed lines) | 66 matched, 41 names exact | 81 matched, 76 names exact |
 
 The slim one is the portable promise: small enough to send or carry. The full
 one is the accurate one, and it is what to run on a machine you work at. They
@@ -1266,12 +1266,12 @@ py tools\make_sample_receipt.py out.png     # a synthetic receipt image
   deciding reason is not the money: its reading is not deterministic, so it
   cannot back a regression baseline. Name it explicitly to see what it does.
 
-  Both engines, same seven photographs, same parser, one command each:
+  Both engines, same eight photographs, same parser, one command each:
 
   | | matched | missed | invented | names exact | unaccounted |
   |---|---|---|---|---|---|
   | `--engine windows` | 66 | 19 | 3 | 41/66 | $101.95 |
-  | `--engine rapid` | **81** | **4** | **0** | **74/81** | **$0.00** |
+  | `--engine rapid` | **81** | **4** | **0** | **76/81** | **$0.00** |
 
   **All eight photographs, every one checked line by line by the user on
   2026-09-09** and exported to truth by `tools/export_truth.py`. This is the
@@ -1287,16 +1287,15 @@ py tools\make_sample_receipt.py out.png     # a synthetic receipt image
   | `ALDI2`, `Walmart1` | none — exact, line for line and name for name | — |
   | `ALDI1_new` | `Chill Beans` read as `Chili Beans` | recogniser — see below |
   | `ALDI1_new` | `Green Onions` read as `Green Onionis` | recogniser |
-  | `ALDI1_new` | `24 ct Paper Bowl` read as `24ct Paper Bow1 356387` | parser: the next line's item number bleeds in, plus `l` read as `1` |
+  | `ALDI1_new` | `24 ct Paper Bowl` read as `24ct Paper Bow1` | recogniser: `l` read as `1`, and the space lost. The stray `356387` that used to trail it was a parser gap, closed in 1.17.2 (§11.76) |
   | `Walmart4` | `GV RY RD IC` read as `GVRY RD IC` | recogniser, lost space |
   | `Walmart2` | `756809105667` read as `...660` | recogniser, one digit |
-  | `COSTCO1` | `RED ONIONS` read as `EEE 9218 RED ONIONS` | parser: `_LEADING_ITEM_NO` strips one flag letter, Costco printed three |
-  | `Walmart3` | `GINGER ROOT` read as `0.42 1b. @ 1.00 1b. / 3.62` | parser: the weighed-item continuation line taken as the description |
-  | `KFC1` | four combo components missed; subtotal blank | scope: they carry no price, and the receipt prints no subtotal |
+  | `KFC1` | four combo components missed; subtotal blank | agreed to build, deferred for a second sample -- §12a item 6 |
 
-  **Five are the recogniser, three the parser, four one scope question.** No
-  amount is wrong anywhere, nothing is invented, and every receipt reconciles to
-  the cent.
+  **Five are the recogniser and four are one agreed feature not yet built.
+  The parser column is empty for the first time**, the three that stood there
+  having been closed in 1.17.2 (§11.76). No amount is wrong anywhere,
+  nothing is invented, and every receipt reconciles to the cent.
 
   **One of them is worth more than its score.** The user confirmed `Chill
   Beans`, which is what Aldi prints; the model returned `Chili Beans`. It is not
@@ -1973,8 +1972,12 @@ The state as of 1.17.0, for whoever reads this next:
     receipts as cash purchases all along (§11.70).
 
   It also prints four combo components with no price under one priced line, and
-  the app records none of them although the user's own verification does -- the
-  one scope question still outstanding from that receipt.
+  the app records none of them although the user's own verification does. **On
+  2026-09-10 the user decided both should be captured** -- the priced combo line
+  and the constituent items beneath it -- so this is agreed work not yet built,
+  rather than an open question (§12a item 6). It waits on a second sample: how a
+  combo is printed varies by chain, and a rule fitted to this one receipt would
+  read KFC and nobody else.
 
   **The prediction generalises, so keep the entry alive in a narrower form.**
   Every new *shape* of receipt has found a defect its predecessors could not,
@@ -2961,6 +2964,102 @@ The state as of 1.17.0, for whoever reads this next:
     declared absent; `git add -A` then swept it in. Harmless, and it would have
     been the first thing a visitor to a public repository saw.
 
+76. **The last three defects section 9 blamed on the parser, and none of them
+    needed a new idea.** Each was a pattern that did not allow for how the ink
+    actually reads.
+
+    **Costco's margin flag, doubled by the reader.** `_LEADING_ITEM_NO` allowed
+    one letter before the item number and `EEE 9218 RED ONIONS` has three: the
+    margin prints a single `E`, and the detector split a hairline glyph into
+    three copies. Because the pattern then failed *entirely* rather than
+    partially, flag and item number both stayed inside the name. Widened to a
+    repeated letter through a backreference rather than `[A-Za-z]{1,3}`, and
+    the distinction matters: a run of the same letter is the duplication being
+    modelled, where three arbitrary letters would eat the opening words of any
+    description that happened to be followed by a number. Costco went 15 to
+    **16 of 16 names exact**.
+
+    **`lb` read as `1b` cost an item its entire name.** The two are the same
+    strokes in this font and, unlike the O-for-zero confusion, there is no
+    surrounding word for the recogniser to break the tie with. `_WEIGHED`
+    matched `lb|lbs|kg|g|oz`, so the weighing line failed the pattern, the name
+    on the line above was never merged in, and the item was booked as
+    `0.42 1b. @ 1.00 1b. / 3.62`. The unit now matches `[l1i]b`. Walmart3 went
+    8 to **9 of 9 names exact**.
+
+    **Some Aldi lines carry a second number between the description and the
+    price.** `343415 24ct Paper Bowl 356387 2.69 NB` has its item number in the
+    left margin *and* a second code before the price, belonging to no column
+    the receipt labels.
+
+    **Where that code comes from is not established, and an earlier draft of
+    this entry claimed that it was.** 356387 appears exactly once in the
+    reading, which argues for its being printed on that line; but the hand
+    transcription of the same 2026-08-21 receipt in `tests/test_units.py`
+    records 356387 as another row's item number, which argues for the section 9
+    note's original reading -- a neighbouring row tipped in by the 1.5 degree
+    skew (§11.69). The files cannot settle it; the paper could. Caught by
+    the quality review, and it was right to insist: the draft used a fact about
+    the OCR *text* to overturn a claim about the *receipt*, which it cannot do.
+
+    None of that needs settling to ship the fix. A bare number at the tail of a
+    description is not part of the name whichever row printed it, and the rule
+    is bounded so that being wrong about the cause costs nothing: only once a
+    leading item number has been found, so Walmart's layout never reaches it;
+    only on five to eight digits, so a description ending in a size or a year
+    keeps its number; and never on the whole description. **This one does not show in the
+    score**: the same line also reads `Bow1` for `Bowl` and loses a space, both
+    the recogniser, so the name is still not exact. Worth doing regardless --
+    a stray six-digit number inside an item name is rubbish the user can see.
+
+    **Names exact 74 to 76 of 81** across the eight photographs, no line lost,
+    none invented, still $0.00 unaccounted. **Windows OCR did not move at all**
+    -- 66/19/3 and 41 names, unchanged -- and that is the corroboration worth
+    having. It boxes words rather than lines, so it reads `lb` correctly, and
+    its Costco reading is too poor to reach the flag rule. A change to a shared
+    parser that moves one engine and not the other is aimed at a real reading
+    defect rather than at the harness.
+
+77. **A hand-added line had no category at all, and the reports disagreed with
+    the pane about it.** Found by the user from the review pane on the KFC
+    receipt: the four combo components they had typed in themselves showed a
+    bare dash in the category column, while the priced line above them showed
+    Uncategorized.
+
+    Both readings were true and they contradicted each other. The categoriser
+    assigns something to every line it reads, so `category_id` is null only for
+    a row a reviewer added by hand -- the Add line button starts from an empty
+    item. `store.py` then reads those rows back through
+    `COALESCE(c.name, 'Uncategorized')`, so the figures counted the line as
+    Uncategorized while the pane it was entered in showed nothing.
+
+    The default is **Other**, chosen by the user over Uncategorized, and the
+    distinction is worth keeping. "Uncategorized" is a *marker* meaning nobody
+    has decided -- `category_names()` withholds it from the candidate list
+    offered to the model for exactly that reason, though rule creation is a
+    separate path that does offer it -- whereas "Other" is a decision. A
+    reviewer who has
+    typed the name in has identified the item; it simply belongs to no named
+    category.
+
+    **The subtle half is the provenance, not the category.** `_collect`
+    promotes a line to `manual` whenever the chosen category differs from the
+    one it loaded with, and a manual category is excluded from rule backfill.
+    Had the fallback been recorded that way, every hand-added line would have
+    been pinned to Other for good and no rule written later could reach it. So
+    the fallback records as `default`, and the row's `original_category_id` is
+    the *resolved* id rather than the stored null, so the application's own
+    choice is not mistaken for the reviewer's.
+
+    Two deliberate limits. Scoped to hand-added rows, at the user's choice:
+    changing the categoriser's own fallback would have moved every line
+    currently sitting in Uncategorized, including ones in receipts already
+    confirmed. And selecting the blank entry by hand still stores null, because
+    that is a reviewer's decision rather than a default. Rows already saved with
+    no category show Other the next time the receipt is opened and take it
+    permanently when that receipt is saved, so existing books correct
+    themselves as they are touched rather than by a migration.
+
 ---
 
 ## 12. Version control
@@ -3045,10 +3144,11 @@ word boxes and a transcription instead of as an image.
 
 ## 12a. Open, deferred by the user
 
-Raised by review during the 1.12.x work and **deliberately not acted on yet** --
-the user asked for them to be recorded and picked up on request. None blocks the
-app; all were reported rather than found by accident, so they are worth keeping
-in one place rather than rediscovering.
+Items 1-5 were raised by review during the 1.12.x work and item 6 by the user in
+1.17.1; all are **deliberately not acted on yet** -- the user asked for them to
+be recorded and picked up on request. None blocks the app; all were reported
+rather than found by accident, so they are worth keeping in one place rather
+than rediscovering.
 
 **Item 5 was partly overtaken by 1.13.0**, which was about naming and
 categorising Costco's lines rather than reading more of them. The seven missed
@@ -3072,6 +3172,7 @@ measurement still works. Six of seven are scored against real truth as of
 | 3 | `app/ui/receipts.py`, `toggle_raw` docstring | Says the pane shows "exactly what the engine returned". With masking on -- the default -- every digit is an asterisk, so "exactly" is wrong on the default path. The truth is stated three lines below and on screen, so it misleads only briefly. |
 | 4 | `Bookkeeping_record.md` 1.12.1 row | Does not record that a real membership number reached a code comment, the test and that row, and was removed by amending the unpushed commit rather than by a follow-up. The 1.11.2 row is the precedent for recording that kind of decision without reproducing the value. |
 | 5 | Costco recognition (still open) | Seven of sixteen line items are still missed and the subtotal is lost in OCR (`SUBTOTAL 188.37` reads as `SUBT TRL`, no amount). Agreed scope at 1.12.0 was the summary block and false lines only. The gap is those seven items (66.26) plus one `5.99` read as `5.93`. |
+| 6 | `app/extract/receipt_text.py`, and how the review pane shows a group | **Combo meals: agreed 2026-09-10, deferred for want of a second sample.** KFC1 prints one priced combo line at 11.89 with four component lines beneath it that carry no price of their own, and no subtotal anywhere. The app records the priced line and drops the four; the hand transcription records all five and supplies the 11.89 subtotal the paper never prints, so the reading is incomplete rather than wrong -- and those four are the whole of the corpus's four missed lines, every other line of every other receipt being read. **The user wants both the combo and its constituent items captured.** Not built yet, on purpose: one receipt cannot show how the shape varies between chains -- indentation, a leading marker, an empty price column, or no cue at all -- and a rule fitted to a single sample would read KFC and no one else. Two decisions travel with it: a component at 0.00 is not a purchase, so it must not dilute the category totals or the reconciliation in §10; and a component needs to belong to its parent line rather than sit beside it as a sibling. Revisit when the next combo receipt arrives -- the user has none to hand as of 2026-09-10 and asked to compare shapes before anything is built. |
 
 ---
 
@@ -3082,9 +3183,11 @@ Ranked by how much they would improve the daily experience:
 1. **More real receipts.** **All eight** photographs now carry a transcription
    and are scored per field, which is what 1.15.0 made cheap — confirming a
    receipt in the app is the whole of the work. The restaurant bill this entry
-   used to ask for arrived in 1.17.1 and found two defects (section 9). Still
-   missing: a **fuel** receipt, a sit-down bill with a **tip line**, something
-   faded or folded, and a **non-USD** one — every amount pattern in
+   used to ask for arrived in 1.17.1 and found two defects (section 9). Most
+   wanted now is **a second combo or set meal**, which is what §12a item 6
+   waits on before the feature can be designed against more than one sample.
+   Also missing: a **fuel** receipt, a sit-down bill with a **tip line**,
+   something faded or folded, and a **non-USD** one — every amount pattern in
    `receipt_text` assumes a `.` decimal separator, so a comma-decimal receipt is
    the one most likely to fail outright rather than partially.
 2. **Learning from corrections.** When a reviewer re-categorises the same item
@@ -3124,6 +3227,7 @@ Ranked by how much they would improve the daily experience:
 | 1.2.2 | 2026-08-23 | Development tooling moved into the project and documented: `verify_exe.py`, `screenshot_pages.py`, `seed_demo.py`, `mock_anthropic.py` (previously throwaway scripts in a temp folder, which would have been lost). Added a "where to pick up" section. |
 | 1.3.0 | 2026-08-29 | **The app reads receipts with nothing configured.** Diagnosis: recognition had never worked on this machine because neither engine was installed — no API key, no Tesseract — so a real Walmart receipt failed with four red flags and no data. Added a third engine using Windows' own OCR (`Windows.Media.Ocr` via the `winrt-*` bindings): no key, no install, no network, and present on every Windows 10/11 machine. Its lines arrive scrambled, so word bounding boxes are re-grouped into printed rows (docTR's half-median-height rule) and three OCR-specific price corruptions repaired. The shared receipt-text parser moved to `app/extract/receipt_text.py`. On the real receipt: subtotal, tax and total exact, 20 of 24 line items, the shortfall reported rather than guessed. Also added 55 abbreviation and brand rules (3 of 20 items categorised → 12 of 20, schema v3 with a migration), an engine-availability line in the log, and an offline OCR language setting. Fixes §11.20–§11.24. 161 tests. |
 | 1.4.0 | 2026-08-29 | **Two more themes.** Five candidate palettes were rendered in the real window and shown to the user, who chose **Dracula** (dark violet) and **Solarized** (warm cream) to sit alongside the existing dark and light. `View -> Theme` became a submenu marking the active theme, replacing a "Switch light / dark" command that no longer described what it did; the header button still cycles, now in an order that groups dark themes before light ones. The contrast and status-distinctness checks that were previously done by hand are now `tests/test_theme.py`, running against every theme including future ones — they caught a candidate whose teal accent sat ΔE 8.2 from its own green "good" status. Fixes §11.25–§11.26. 221 tests. |
+| 1.17.2 | 2026-09-10 | **The last three parser defects, closed.** None needed a new idea -- each was a pattern that did not allow for how the ink actually reads (§11.76). Costco's margin flag is one letter the detector splits into three, so `EEE 9218 RED ONIONS` failed `_LEADING_ITEM_NO` outright and kept flag and item number inside the name; a backreference now accepts a repeated letter, deliberately not `[A-Za-z]{1,3}`, which would eat the opening of any description followed by a number. `lb` reads as `1b` -- the same strokes, with no surrounding word to break the tie -- so `_WEIGHED` missed the weighing line, never merged the name from the line above, and booked the item as `0.42 1b. @ 1.00 1b. / 3.62`. And some Aldi lines carry a second code between the description and the price. Where it comes from is **not** established -- it appears once in the reading, but the hand transcription of the same receipt records it as another row's item number -- and an earlier draft of §11.76 claimed otherwise; the strip is bounded so that being wrong about the cause costs nothing. **Names exact 74 → 76 of 81** over the eight photographs -- Costco 15 → 16 of 16, Walmart3 8 → 9 of 9 -- with no line lost, none invented and still $0.00 unaccounted. The Aldi fix does not show in the score, because the same line also reads `Bow1` for `Bowl`; it is worth doing because it removes a stray six-digit number from an item name in the user's books. **Windows OCR did not move at all** (66/19/3, 41 names), which is the corroboration worth having: a shared-parser change that moves one engine and not the other is aimed at a real reading defect rather than at the harness. **Then the user found, in the review pane of the KFC receipt, that the four combo components they had typed in by hand carried no category at all** while the priced line above them read Uncategorized (§11.77). Only a hand-added row can reach that state, and `store.py` was already counting it as Uncategorized through a `COALESCE`, so the pane and the figures disagreed about the same line. Such a row now falls into **Other** -- the user's choice over Uncategorized, and the right one: Uncategorized is a marker meaning nobody has decided, while a reviewer who typed the name in has identified the item. The trap was the provenance rather than the category: `_collect` treats any category differing from the loaded one as the reviewer's own and excludes it from rule backfill, so recording the fallback that way would have pinned every hand-added line to Other for good. It records as `default` instead. Scoped to hand-added rows only, also at the user's choice, so nothing already in the books moves until its receipt is next saved. 523 tests, both baselines re-recorded. |
 | 1.17.1 | 2026-09-10 | **What the pre-push reviews caught.** Three wrong comments, one of which was a real defect rather than wrong prose (§11.73-74). `MAX_CONFIDENCE` was 0.75 while `LOW_CONFIDENCE` is 0.6, so a RapidOCR reading with balanced arithmetic raised no flag and `auto_confirm_clean` signed it off unreviewed -- while the comment promised the exact opposite, citing Windows OCR, which was doing it correctly at 0.5. Now 0.55, and the test that was meant to guard it compares against the real threshold instead of against its own constant. `rapid_ocr.py` and `Bookkeeping.spec` also gave flatly opposite accounts of whether PyInstaller resolves a literal name passed to `importlib`; the spec is right, and believing the other one would have meant deleting the excludes that keep the slim build at 30 MB. Quoted figures regenerated from the committed baselines with the corpus named -- one docstring had been carrying two different Windows OCR scores at once. **Separately, the pre-push scan caught me reintroducing the very identifiers §11.57 exists to remove**: writing up the card-digit fix put a real last-four and a real approval code into a comment, a test literal and this document. All replaced with invented values, kept distinct from each other so the test still proves what it claims. 515 tests. |
 | 1.17.0 | 2026-09-08 | **A second offline engine, and a second build to carry it.** The user judged the recognition not good enough and asked for a better open-source model. First the correction: Claude vision had never run on their receipts at all -- no API key -- so everything they had seen was Windows OCR. Surveyed the field against the constraints that bind here (offline, CPU, no key, portable): docTR, EasyOCR and Surya need PyTorch, the VLM readers need a GPU, PaddleOCR needs its own runtime. **RapidOCR** fits -- PP-OCR models on ONNX Runtime, Apache 2.0, weights in the wheel. Measured through the same parser against the confirmed receipts: 73 lines matched against 63, 4 missed against 14, none invented against 3, and 59 item names exact against 37; on Costco 15 of 16 items instead of 12, and it reads the logo Windows OCR cannot read at any scale. It costs 95 MB and 1.7 seconds of start-up, so there are now two builds from one spec: `build.bat` gives the 30 MB portable one and `build.bat --full` the 125 MB one. Three traps on the way, all in §3 and §11.63-66, the sharpest being that touching WinRT first stops onnxruntime loading at all. 447 tests. **This document was also renamed from `Bookkeeping.md` to `Bookkeeping_record.md`** — the workspace convention since August 2026 — with `git mv` so the history follows, and the 18 references to it across the code, tests and README updated. Folded into this version rather than given a patch bump of its own, because 1.17.0 is not published. **The accuracy harness was then pointed at the new engine**, which it had never been: `measure_accuracy.py` built a `WindowsOcrExtractor` unconditionally, so from the moment RapidOCR became the default the `--check` gate was guarding an engine the full build no longer ran — and saying nothing about it. It now takes `--engine` and defaults to `auto`, the first installed of RapidOCR → Windows OCR → Tesseract, which is the application's own order minus Claude; Claude is excluded because its reading is not deterministic and so cannot back a regression baseline, not because of the cost. Baselines are per engine (`accuracy_baseline.rapid.json`, `accuracy_baseline.windows.json`) and a cross-engine `--check` is **refused rather than reported**, since every metric moving at once measures the change of engine and nothing the code did. Two defects found while building it: an unrecognised engine name fell through `build_engines` to the head of the fallback list, which would have answered a typo by running Claude; and resolving the engine before looking for photographs turned a clean clone's "none found" into "no engine available". Both are pinned by tests. The headline figures are now reproducible from one command each rather than quoted from a one-off run — windows 63/14/3 and 37 names, rapid 73/4/0 and 59 names, $117.40 against $14.87 unaccounted across seven photographs. **That measurement then paid for itself**: attributing all 18 remaining defects line by line showed the model was no longer the constraint. Five of the fourteen wrong names were one confusion — a capital O printed as a zero — which a larger recogniser could not have fixed, since the ambiguity is in the ink rather than the reading. Two narrow parser rules put them back (§11.68) and names exact went **59 → 64 of 73**, Walmart1 reaching 23 of 23, with no line lost and none invented. What remains is three genuine detection misses, three rows where Aldi's FP/NF column bleeds into its neighbour, two parser gaps, and two names where the reader spelled the word correctly and the paper did not. On the open question of whether to move to PP-OCRv6 medium: it would cost about 100 MB of weights for perhaps three of the thirteen defects left, so it stays untested rather than adopted. **Then the largest of those remaining clusters turned out not to be a model problem either** (§11.69): the page is photographed 1.5° off square, which on a receipt's widely spaced columns is enough to tip a line's left-hand end into the row above. The angle was already in the data — RapidOCR's detector returns rotated polygons and the code was flattening them to bounding boxes — so grouping along the measured baseline took 73 → 75 lines matched, 4 → 2 missed, 64 → 68 names, and **$14.87 → $0.95 unaccounted** across seven photographs, with Costco and ALDI1_new reconciling exactly. Of the eighteen defects this version started with, nine remain and none of them is the recogniser's fault. **Then the user supplied a KFC receipt and a fourth Walmart** -- the first restaurant bill ever tested here, and the variety gap section 13 has ranked first for weeks. It read the new chain's merchant, date and tax first time and correctly refused to invent prices for the four unpriced combo components, but it exposed two defects (§11.70-71), one of them long-standing and serious: `Cashier: Zackariah` matched CASH, so **three of the eight photographs had been recording a card purchase as cash**, and the card's last four digits were being read off the approval code. Both fixed, plus `CARRY OUT` as a total label for a receipt that never says TOTAL. All eight now report the right tender; KFC1 reconciles 11.89 + 0.95 = 12.84; nothing on the older six moved. Money unaccounted across eight photographs is **$0.15**, all of it the 5-cent bottle deposit that the O-for-zero flag still swallows. **That last gap then closed too** (§11.72), and the user's own observation is what found it: the previous engine handled the deposit line correctly, because Windows OCR boxes *words* and rebuilds the lost space from geometry while RapidOCR boxes *lines* and simply omits it. The parser now reads a lone zero in the flag column as the letter O. **$0.00 unaccounted across all eight photographs**, Walmart1 at 24 of 24 names, and for the first time every line of every transcribed receipt read with none missed and none invented -- 59/0/0 against Windows OCR's 49/10/2 on the same corpus. 515 tests. **The user then checked every photograph line by line** and exported them to truth -- the first time the whole corpus has carried a human transcription, and the first to include a restaurant bill. `ALDI.jpg` was renamed back to `ALDI1_new.jpg` to match the name its receipt is confirmed under, since the exporter finds photographs by filename and the earlier rename had orphaned 18 verified lines. Scored against the full set: **81 matched, 4 missed, none invented, 74 names exact, $0.00 unaccounted**, against Windows OCR's 66/19/3 and 41 names. ALDI2 and Walmart1 are exact line for line and name for name. Of the twelve differences left, five are the recogniser, three the parser (§9), and four are a single scope question -- KFC's unpriced combo components and its absent subtotal, both of which the user *did* record by hand, so the app is not capturing something they want. That is the next thing to decide rather than a defect to fix quietly. |
 | 1.16.0 | 2026-09-08 | **A line you type is now looked up too, and a dead end says so.** Reported from a screenshot of two lines with nothing underneath them. They had failed for opposite reasons: one was added by hand and had never been asked about at all, the other had been asked weeks earlier and genuinely has no name and no translation. So the fix is two. `enrich_now` runs the expansion and translation passes over the stored rows after every save -- filling blanks only, never touching amounts, categories or a confirmed status -- and a question that came back empty is now recorded and shown as `no translation found` / 未找到译文 rather than left blank. Nothing is said where nothing was asked, so plain-English lines stay quiet. A lookup that *failed* is deliberately not recorded as a lookup that found nothing (§11.62). The pane refreshes when the pass finishes only if the reviewer has not started typing again. Measured on the real receipt: `DOVE BW 11OZ` becomes 多芬 BW 11OZ, `EQJELLUBE80Z` says 未找到译文, and the receipt stays confirmed. 432 tests. |

@@ -16,7 +16,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .. import i18n, lookup, pipeline, privacy, store
+from .. import categorize, i18n, lookup, pipeline, privacy, store
 from ..i18n import t
 from ..money import from_cents, to_cents
 from .theme import Button, Card, Pill, ScrollFrame, entry, field_label
@@ -487,6 +487,18 @@ class ReviewPane:
                 return category["id"]
         return None
 
+    def _miscellaneous_category_id(self) -> int | None:
+        """The category a line with none of its own falls into.
+
+        None when that category has been deleted -- the store refuses to delete
+        Uncategorized but allows it for this one -- in which case the combobox
+        shows the same dash it always did, which is a safe way to degrade.
+        """
+        for category in self._categories:
+            if category["name"] == categorize.MISCELLANEOUS_CATEGORY:
+                return category["id"]
+        return None
+
     def _build_items(self, parent: tk.Frame, receipt: dict) -> None:
         theme = self.theme
         block = tk.Frame(parent, bg=theme["CARD"])
@@ -528,11 +540,27 @@ class ReviewPane:
         amount_box = entry(line, theme, width=9, textvariable=amount)
         amount_box.pack(side="left", padx=(0, 3))
         amount_box.bind("<KeyRelease>", lambda _e: self._update_sum())
-        combo = self._category_combo(line, item.get("category_id"))
+        # A line with no category of its own used to show a bare dash here
+        # while the reports counted it as Uncategorized, so the pane and the
+        # figures disagreed about the same row. Only a hand-added row can reach
+        # that state: the categoriser always assigns something to a line it
+        # read itself, and the Add line button starts from an empty item.
+        category_id = item.get("category_id")
+        source = item.get("category_source") or "manual"
+        if category_id is None:
+            category_id = self._miscellaneous_category_id()
+            # "default" and not "manual", which matters more than it looks:
+            # _collect below only promotes a category to "manual" when the
+            # reviewer changed it, and a manual category is excluded from rule
+            # backfill. Recording the application's own fallback as the
+            # reviewer's choice would pin every hand-added line to Other for
+            # good, so a rule written later could never reach it.
+            source = "default"
+
+        combo = self._category_combo(line, category_id)
         combo.configure(width=18)
         combo.pack(side="left", padx=(0, 3))
 
-        source = item.get("category_source") or "manual"
         tk.Label(line, text={"rule": "rule", "model": "model", "merchant": "shop",
                              "manual": "you", "default": "—"}.get(source, source),
                  bg=theme["CARD"], fg=theme["DIM"], font=theme.font(8),
@@ -581,7 +609,9 @@ class ReviewPane:
             "original_description": item.get("description", ""),
             "is_discount": bool(item.get("is_discount")),
             "taxable": item.get("taxable"),
-            "original_category_id": item.get("category_id"),
+            # The resolved id, not the stored one: were the fallback treated
+            # as a change, _collect would mark the line manual on sight.
+            "original_category_id": category_id,
         }
 
         def remove() -> None:

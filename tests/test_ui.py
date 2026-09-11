@@ -242,6 +242,64 @@ def test_a_line_can_be_removed_from_the_pane(window):
     assert len(review._item_rows) == before - 1
 
 
+def test_a_hand_added_line_falls_into_the_miscellaneous_category(window):
+    """A row the reviewer types in has no category, and used to show a blank.
+
+    The reports counted such a line as Uncategorized through a COALESCE while
+    the pane showed a dash, so the same row read two different ways. It now
+    takes Other -- a real bucket rather than the marker meaning "nobody has
+    decided", since a reviewer who typed the name in has identified it.
+    """
+    window.add_manual()
+    pump(window)
+    review = window.pages["receipts"].review
+    review._add_item_row(review.items_holder, {})
+    pump(window)
+
+    record = review._item_rows[-1]
+    other = next(c["id"] for c in review._categories if c["name"] == "Other")
+    assert review._category_id(record["combo"]) == other
+
+    # "default", not "manual" -- otherwise a rule written later is locked out.
+    assert record["source"] == "default"
+    # And the fallback must not read as a change the reviewer made.
+    assert record["original_category_id"] == other
+
+
+def test_a_hand_added_line_saves_with_that_category(window):
+    """The default has to reach the database, not just the combobox."""
+    window.add_manual()
+    pump(window)
+    review = window.pages["receipts"].review
+    review._add_item_row(review.items_holder,
+                         {"description": "Biscuit", "amount_cents": 0})
+    pump(window)
+
+    other = next(c["id"] for c in review._categories if c["name"] == "Other")
+    saved = review._collect()
+    biscuit = [item for item in saved.items if item.description == "Biscuit"]
+    assert len(biscuit) == 1
+    assert biscuit[0].category_id == other
+    assert biscuit[0].category_source == "default"
+
+
+def test_a_line_that_already_has_a_category_keeps_it(window):
+    """The fallback must not overwrite a category something else decided."""
+    window.add_manual()
+    pump(window)
+    review = window.pages["receipts"].review
+    groceries = next(c["id"] for c in review._categories
+                     if c["name"] == "Groceries")
+    review._add_item_row(review.items_holder,
+                         {"description": "Milk", "amount_cents": 199,
+                          "category_id": groceries, "category_source": "rule"})
+    pump(window)
+
+    record = review._item_rows[-1]
+    assert review._category_id(record["combo"]) == groceries
+    assert record["source"] == "rule"
+
+
 def test_deleting_from_the_pane_removes_the_receipt(window, books, monkeypatch):
     monkeypatch.setattr("app.ui.receipts.messagebox.askyesno",
                         lambda *args, **kwargs: True)
